@@ -38,39 +38,58 @@ export function orderFrames(frames: readonly Frame[], mode: Mode, seed: number):
   return shuffled(frames.filter(MATCH[mode]), seed);
 }
 
-// ── ритм ленты: какие кадры занимают две колонки и где пустые клетки ──
+// ── ритм ленты: крупные кадры и клетки с подписью плёнки ──
 
 export interface FeedItem {
   key: string;
   ratio: number;
-  span: 1 | 2;
+  /** Сколько колонок занимает */
+  span: 1 | 2 | 3;
+  /** frame: кадр; note: клетка с подписью плёнки */
   kind: "frame" | "note";
   frame?: Frame;
-  /** У пустой клетки: чья это плёнка */
+  /** У клетки с подписью: чья это плёнка */
   roll?: number;
 }
 
 /**
- * Решаем, какие кадры растянуть на две колонки (случайно, но не подряд, только горизонтальные)
- * и куда вставить пустые клетки с подписью плёнки. Тот же seed даёт ту же раскладку.
+ * Ритм ленты. Тот же seed даёт ту же раскладку.
+ * - Главный кадр: редко один кадр заметно крупнее остальных. На десктопе горизонтальный занимает
+ *   три колонки из четырёх, вертикальный две (и получается высоким). На телефоне это всю ширину.
+ * - Широкий кадр: горизонтальный на две колонки, не подряд.
+ * - Клетка с подписью: совсем редкая, называет плёнку.
+ * Часть крупных кадров в сетке станет обычными, если рядом не найдётся ровных колонок (см. masonry.ts).
  */
 export function planFeed(frames: readonly Frame[], cols: number, seed: number): FeedItem[] {
   const rnd = mulberry32(seed ^ 0x9e3779b1 ^ (cols * 7919));
-  const wide = cols >= 4;
-  const spanChance = wide ? 0.3 : 0.18; // часть станет узкими, если не найдётся ровной пары колонок
-  const spanGap = wide ? 3 : 6; // сколько кадров минимум между двумя широкими
+  const desk = cols >= 4;
+
+  const bigChance = desk ? 0.13 : 0.07;
+  const bigGap = desk ? 9 : 12; // сколько кадров минимум между двумя главными
+  const wideChance = desk ? 0.25 : 0.18;
+  const wideGap = desk ? 3 : 6; // сколько кадров минимум между двумя крупными любого рода
   const noteChance = 0.05;
-  const noteGap = 14; // пустые клетки редкие: не чаще одной на 14 кадров
+  const noteGap = 14;
 
   const items: FeedItem[] = [];
-  let sinceSpan = spanGap;
+  let sinceBig = bigGap;
+  let sinceWide = wideGap;
   let sinceNote = 0;
 
   for (const f of frames) {
     const ratio = f.w / f.h;
-    const canSpan = ratio >= 1.2 && sinceSpan >= spanGap;
-    const span = canSpan && rnd() < spanChance ? 2 : 1;
-    sinceSpan = span === 2 ? 0 : sinceSpan + 1;
+    const landscape = ratio >= 1.2;
+
+    let span: 1 | 2 | 3 = 1;
+    let big = false;
+    if (sinceBig >= bigGap && rnd() < bigChance) {
+      big = true;
+      span = desk && landscape ? 3 : 2;
+    } else if (landscape && sinceWide >= wideGap && rnd() < wideChance) {
+      span = 2;
+    }
+    sinceBig = big ? 0 : sinceBig + 1;
+    sinceWide = span > 1 ? 0 : sinceWide + 1;
     items.push({ key: f.id, ratio, span, kind: "frame", frame: f });
 
     sinceNote++;

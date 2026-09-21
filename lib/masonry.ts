@@ -1,14 +1,14 @@
 // Masonry без обрезки: высота клетки всегда следует пропорции кадра.
 //
-// Широкий кадр (span 2) ложится на пару соседних колонок и не должен оставлять под собой дыру.
-// Поэтому он остаётся широким, только если найдётся пара колонок с почти ровным верхом.
-// Если её нет, в более короткую колонку сначала «подтягиваются» ближайшие узкие кадры (до трёх);
-// и только когда и это не помогает, кадр становится обычным узким.
+// Крупный кадр занимает несколько соседних колонок (span 2 или 3) и не должен оставлять под собой дыру.
+// Поэтому он остаётся крупным, только если найдётся окно колонок с почти ровным верхом.
+// Если его нет, в подходящую колонку окна сначала «подтягиваются» ближайшие узкие кадры (до трёх);
+// и только когда и это не помогает, кадр становится на размер меньше: три колонки, две, одна.
 
 export interface MItem {
   key: string;
   ratio: number;
-  span: 1 | 2;
+  span: 1 | 2 | 3;
 }
 
 export interface Placed<T> {
@@ -27,6 +27,8 @@ interface Options {
   lookahead?: number;
 }
 
+type Span = 1 | 2 | 3;
+
 export function layoutMasonry<T extends MItem>(items: readonly T[], o: Options) {
   const { cols, width, gap, lookahead = 12 } = o;
   const colW = (width - gap * (cols - 1)) / cols;
@@ -34,54 +36,61 @@ export function layoutMasonry<T extends MItem>(items: readonly T[], o: Options) 
   const placed: Placed<T>[] = [];
   const queue = [...items];
 
-  const heightOf = (it: T, span: 1 | 2) => (span === 2 ? colW * 2 + gap : colW) / it.ratio;
+  const widthOf = (span: Span) => span * colW + (span - 1) * gap;
+  const heightOf = (it: T, span: Span) => widthOf(span) / it.ratio;
   const shortest = () => tops.indexOf(Math.min(...tops));
 
-  const put = (item: T, span: 1 | 2, col: number, y: number) => {
-    const w = span === 2 ? colW * 2 + gap : colW;
+  const put = (item: T, span: Span, col: number, y: number) => {
     const h = heightOf(item, span);
-    placed.push({ item, x: col * (colW + gap), y, w, h });
+    placed.push({ item, x: col * (colW + gap), y, w: widthOf(span), h });
     for (let c = col; c < col + span; c++) tops[c] = y + h + gap;
   };
 
-  const tolerance = colW * 0.15; // такую разницу в верхах пары не замечаем
-  const maxGap = colW * 0.25; // лишняя пустота под широким кадром не больше этой
+  const tolerance = colW * 0.15; // такую разницу в верхах окна не замечаем
+  const maxGap = colW * 0.25; // лишняя пустота под крупным кадром не больше этой
+
+  const spread = (list: number[]) => Math.max(...list) - Math.min(...list);
 
   while (queue.length) {
     const it = queue[0];
+    const span = Math.min(it.span, cols) as Span;
 
-    if (it.span === 1 || cols < 2) {
+    if (span === 1) {
       queue.shift();
       const c = shortest();
       put(it, 1, c, tops[c]);
       continue;
     }
 
-    // широкий: ищем пару соседних колонок с самым ровным верхом
-    let pair = 0;
-    let diff = Infinity;
-    for (let c = 0; c < cols - 1; c++) {
-      const d = Math.abs(tops[c] - tops[c + 1]);
-      if (d < diff - 1e-6) {
-        diff = d;
-        pair = c;
+    // крупный: ищем окно из span соседних колонок с самым ровным верхом
+    let start = 0;
+    let best = Infinity;
+    for (let c = 0; c + span <= cols; c++) {
+      const d = spread(tops.slice(c, c + span));
+      if (d < best - 1e-6) {
+        best = d;
+        start = c;
       }
     }
-    const low = tops[pair] <= tops[pair + 1] ? pair : pair + 1; // короткая колонка пары
+    const win = tops.slice(start, start + span);
 
-    if (diff > tolerance) {
-      // пробуем выровнять пару: подтягиваем в короткую колонку один-три ближайших узких кадра
+    if (best > tolerance) {
+      // пробуем выровнять окно: подтягиваем в одну из его колонок один-три ближайших узких кадра
       const cands: { idx: number; h: number }[] = [];
       for (let j = 1; j < Math.min(queue.length, lookahead + 1); j++) {
         if (queue[j].span === 1) cands.push({ idx: j, h: heightOf(queue[j], 1) + gap });
       }
       let bestSet: number[] = [];
-      let bestScore = diff - tolerance / 2; // берём только заметное улучшение
+      let bestCol = start;
+      let bestScore = best - tolerance / 2; // берём только заметное улучшение
       const consider = (set: number[], sum: number) => {
-        const score = Math.abs(diff - sum);
-        if (score < bestScore) {
-          bestScore = score;
-          bestSet = set;
+        for (let k = 0; k < span; k++) {
+          const score = spread(win.map((t, m) => (m === k ? t + sum : t)));
+          if (score < bestScore) {
+            bestScore = score;
+            bestSet = set;
+            bestCol = start + k;
+          }
         }
       };
       for (let a = 0; a < cands.length; a++) {
@@ -96,22 +105,19 @@ export function layoutMasonry<T extends MItem>(items: readonly T[], o: Options) 
       if (bestSet.length) {
         const picked = bestSet.map((i) => queue[i]);
         for (const i of [...bestSet].sort((p, q) => q - p)) queue.splice(i, 1);
-        for (const cand of picked) put(cand, 1, low, tops[low]);
+        for (const cand of picked) put(cand, 1, bestCol, tops[bestCol]);
         continue;
       }
 
-      if (diff > maxGap) {
-        // ровной пары нет: кадр остаётся узким
-        queue.shift();
-        const narrow = { ...it, span: 1 } as T;
-        const c = shortest();
-        put(narrow, 1, c, tops[c]);
+      if (best > maxGap) {
+        // ровного окна нет: кадр становится на размер меньше и пробует снова
+        queue[0] = { ...it, span: span - 1 } as T;
         continue;
       }
     }
 
     queue.shift();
-    put(it, 2, pair, Math.max(tops[pair], tops[pair + 1]));
+    put(it, span, start, Math.max(...win));
   }
 
   const height = Math.max(0, Math.max(...tops) - gap);
