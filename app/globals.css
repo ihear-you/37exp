@@ -15,6 +15,9 @@
   /* рамка вокруг кадра: тонкая линия + мягкая тень, светлые кадры получают чуть больше */
   --frame-ring: 0 0 0 1px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.1);
   --frame-ring-light: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.14);
+  /* та же пара, но для карточек плёнки: чуть мягче в покое, заметнее при наведении */
+  --card-ring: 0 0 0 1px var(--line), 0 1px 3px rgba(0, 0, 0, 0.08);
+  --card-ring-hover: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.12);
 }
 
 @theme inline {
@@ -27,8 +30,9 @@
   --color-ink-faint: var(--ink-faint);
   --color-line: var(--line);
   --color-accent: var(--accent);
-  --font-sans: var(--font-pt-mono), ui-monospace, monospace;
-  --font-display: var(--font-pt-mono), ui-monospace, monospace;
+  --font-sans: var(--font-plex), -apple-system, "Segoe UI", sans-serif;
+  /* только логотип: плотный чёрный гротеск, латиница и цифры */
+  --font-logo: var(--font-anton), Impact, sans-serif;
 }
 
 html {
@@ -54,8 +58,8 @@ body {
   outline-offset: 2px;
 }
 
-.font-display {
-  font-family: var(--font-display);
+.font-logo {
+  font-family: var(--font-logo);
 }
 
 /* прокручиваемая строка без полосы (фильтры на телефоне) */

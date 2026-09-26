@@ -11,7 +11,7 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: PageProps<"/rolls/[id]">): Promise<Metadata> {
   const { id } = await params;
   const roll = ROLLS.find((r) => r.id === Number(id));
-  return { title: roll ? `${rollView(roll).title} · plenka` : "Плёнка не найдена" };
+  return { title: roll ? `${rollView(roll).title} · [37exp]` : "Плёнка не найдена" };
 }
 
 export default async function RollPage({ params }: PageProps<"/rolls/[id]">) {
@@ -45,7 +45,7 @@ export default async function RollPage({ params }: PageProps<"/rolls/[id]">) {
         <Link href="/rolls" className="text-sm text-ink-faint transition-colors hover:text-ink">
           ← Все папки
         </Link>
-        <h1 className="font-display mt-3 text-[26px] leading-[1.2] md:text-[40px]">{view.title}</h1>
+        <h1 className="mt-3 text-[26px] leading-[1.2] md:text-[40px]">{view.title}</h1>
         <div className="mt-6 grid gap-x-10 gap-y-6 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4 md:max-w-md">
             {facts.map(([k, v]) => (

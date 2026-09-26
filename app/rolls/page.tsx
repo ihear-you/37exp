@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import RollsBrowser, { type RollCard } from "../components/RollsBrowser";
 import { allRollViews, framesOfRoll } from "@/lib/catalog";
 
-export const metadata: Metadata = { title: "Папки · plenka" };
+export const metadata: Metadata = { title: "Папки · [37exp]" };
 
 export default function RollsPage() {
   const rolls: RollCard[] = allRollViews().map((r) => ({

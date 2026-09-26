@@ -17,8 +17,11 @@ export default function SiteHeader() {
   return (
     <header className="sticky top-0 z-30 h-14 border-b border-line bg-paper/90 backdrop-blur-md">
       <nav className="mx-auto flex h-full max-w-[1600px] items-center gap-2 px-3 md:gap-8 md:px-5" aria-label="Основное">
-        <Link href="/" className="font-display shrink-0 whitespace-nowrap text-[20px] leading-none md:text-[24px]">
-          plenka
+        <Link
+          href="/"
+          className="font-logo shrink-0 whitespace-nowrap text-[20px] leading-none tracking-tight md:text-[24px]"
+        >
+          [37exp]
         </Link>
         <div className="flex items-center">
           {NAV.map((n) => (

@@ -266,7 +266,7 @@ export default function UploadPrototype() {
         </div>
 
         <p className="text-[11px] uppercase tracking-[0.12em] text-ink-faint">Название папки</p>
-        <p className={`font-display mt-1 min-h-[3.4rem] text-[20px] leading-snug ${title ? "" : "text-ink-faint/60"}`}>{title || "выберите плёнку"}</p>
+        <p className={`mt-1 min-h-[3.4rem] text-[20px] leading-snug ${title ? "" : "text-ink-faint/60"}`}>{title || "выберите плёнку"}</p>
 
         {mode === "existing" ? (
           <div className="mt-6 space-y-4">
@@ -382,7 +382,7 @@ export default function UploadPrototype() {
           } ${drag ? "border-accent bg-accent/5" : "border-line bg-paper-light/60"}`}
         >
           <UploadIcon width={28} height={28} className="text-ink-faint" />
-          <p className="font-display mt-2 text-lg text-ink-soft">Перетащите папку или файлы сюда</p>
+          <p className="mt-2 text-lg text-ink-soft">Перетащите папку или файлы сюда</p>
           <p className="mt-1 text-sm text-ink-faint">Папка подскажет плёнку, ISO и дату по своему названию, для отдельных файлов поля заполняются вручную</p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <button type="button" onClick={() => folderInput.current?.click()} className={ghost}>

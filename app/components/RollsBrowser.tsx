@@ -105,7 +105,7 @@ export default function RollsBrowser({ rolls }: { rolls: RollCard[] }) {
         </ul>
       ) : (
         <div className="py-24 text-center">
-          <p className="font-display text-xl text-ink-soft">Ничего не нашлось</p>
+          <p className="text-xl text-ink-soft">Ничего не нашлось</p>
           <button type="button" onClick={reset} className="mt-3 text-sm text-accent underline underline-offset-4">
             Сбросить фильтры
           </button>
@@ -129,7 +129,7 @@ function RollCardView({ roll }: { roll: RollCard }) {
   return (
     <Link
       href={`/rolls/${roll.id}`}
-      className="group block h-full rounded-[3px] bg-paper-light p-3 shadow-[0_0_0_1px_var(--line),0_1px_3px_rgba(0,0,0,.08)] transition-shadow hover:shadow-[0_0_0_1px_rgba(0,0,0,.35),0_6px_18px_rgba(0,0,0,.12)]"
+      className="group block h-full rounded-[3px] bg-paper-light p-3 shadow-[var(--card-ring)] transition-shadow hover:shadow-[var(--card-ring-hover)]"
     >
       <div className="flex items-start gap-1 bg-paper-deep p-1.5">
         {strip.map((f) => (
@@ -138,7 +138,7 @@ function RollCardView({ roll }: { roll: RollCard }) {
           </div>
         ))}
       </div>
-      <h2 className="font-display mt-3 text-[17px] leading-snug group-hover:text-accent">{roll.title}</h2>
+      <h2 className="mt-3 text-[17px] leading-snug group-hover:text-accent">{roll.title}</h2>
       <p className="mt-1.5 text-sm text-ink-soft">
         {[roll.camera, roll.iso ? `ISO ${roll.iso}` : null, roll.format === "120" ? "120" : null, `${roll.count} ${plural(roll.count, ["кадр", "кадра", "кадров"])}`]
           .filter(Boolean)

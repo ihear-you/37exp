@@ -100,7 +100,7 @@ export default function Masonry({ frames, rolls, rhythm = false, rollLink = fals
                   href={`/rolls/${roll.id}`}
                   title={roll.title}
                   aria-label={`Плёнка: ${roll.title}`}
-                  className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-full bg-paper/90 text-ink shadow-sm ring-1 ring-black/10 backdrop-blur-sm transition-colors before:absolute before:-inset-2 before:content-[''] hover:bg-ink hover:text-paper"
+                  className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-full bg-paper/90 text-ink shadow-sm ring-1 ring-line backdrop-blur-sm transition-colors before:absolute before:-inset-2 before:content-[''] hover:bg-ink hover:text-paper"
                 >
                   <FilmIcon width={16} height={16} />
                 </Link>
@@ -165,7 +165,7 @@ function NoteTile({ roll }: { roll: RollView }) {
       className="group absolute inset-0 flex flex-col justify-end overflow-hidden rounded-[2px] bg-paper-deep p-3 ring-1 ring-line transition-colors hover:bg-paper-edge"
     >
       <FilmIcon className="absolute left-3 top-3 text-ink-faint" width={16} height={16} />
-      <span className="font-display text-[15px] leading-snug text-ink-soft">{roll.title}</span>
+      <span className="text-[15px] leading-snug text-ink-soft">{roll.title}</span>
       <span className="mt-1 text-[11px] uppercase tracking-[0.12em] text-ink-faint transition-colors group-hover:text-accent">
         {roll.count} кадров · открыть →
       </span>
