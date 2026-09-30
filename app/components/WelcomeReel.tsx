@@ -1,14 +1,22 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { FRAMES, feedSrc } from "@/lib/catalog";
-import { shuffled } from "@/lib/rand";
+import { mulberry32, shuffled } from "@/lib/rand";
 import type { EditorialPhoto } from "@/lib/unsplash";
 import { UploadIcon } from "./icons";
 
-// Редакционная фотомозаика для пустой ленты: чёрный фон, ряды и колонны фотографий едут
-// без остановки — влево/вправо, вверх/вниз, без вращения и без зумов. Раскладка и порядок
-// зависят только от фиксированного зерна, а сама анимация — чистый CSS (без React-таймеров),
-// поэтому сервер и клиент рисуют одно и то же и гидрация не расходится.
+// Пустая лента: хаотичный коллаж фотографий внахлёст, без сетки и без поворота, размазанный
+// по всему экрану (зоны ниже), а не собранный в центре. Начиная с захода на сайт и дальше
+// непрерывно, отдельные плитки по очереди «взлетают» — плавно растут в течение всего своего
+// цикла (у части он уже начинается не с нуля — restScale, будто путь начат раньше) и под
+// конец рывком вылетают за экран, будто камера ныряет сквозь стену фотографий на зрителя, —
+// а на их месте тут же встаёт новое фото в исходном размере. Раскладка и первый цикл каждой
+// плитки зависят только от фиксированного зерна, поэтому сервер и клиент рисуют одно и то же
+// и гидрация не расходится. Рамка каждой плитки — реальные пропорции фото (aspect-ratio),
+// кадрирования нет.
 const SEED = 4242;
 
 interface Pic {
@@ -16,121 +24,96 @@ interface Pic {
   src: string;
   color: string;
   alt: string;
+  w: number;
+  h: number;
 }
 
 const fallbackPics: Pic[] = shuffled(FRAMES, SEED)
-  .slice(0, 24)
-  .map((f) => ({ id: f.id, src: feedSrc(f.id), color: f.color, alt: "" }));
+  .slice(0, 30)
+  .map((f) => ({ id: f.id, src: feedSrc(f.id), color: f.color, alt: "", w: f.w, h: f.h }));
 
-// Горизонтальные ленты во всю ширину, разной высоты (сумма — 100%), едут в разные стороны
-// с разной скоростью, чтобы ритм не совпадал и коллаж не выглядел механическим.
-const ROWS = [
-  { height: 17, dir: "left", duration: 34 },
-  { height: 15, dir: "right", duration: 27 },
-  { height: 19, dir: "left", duration: 40 },
-  { height: 14, dir: "right", duration: 24 },
-  { height: 18, dir: "left", duration: 36 },
-  { height: 17, dir: "right", duration: 30 },
-] as const;
+interface Slot {
+  left: number;
+  top: number;
+  baseWidth: number; // % ширины экрана в покое (до анимационного scale)
+}
 
-// Ширины кадров одного прохода ленты (vw — доля от экрана, а не от самой ленты).
-const ROW_WIDTHS = [21, 15, 27, 13, 19, 24, 16];
-const ROW_SHIFT = ROW_WIDTHS.reduce((a, b) => a + b, 0);
+// Экран разбит на зоны ZONES×ZONES, в каждой — одна плитка со случайным смещением внутри
+// зоны: гарантирует, что кадры покрывают весь экран, а не стягиваются к центру, но раскладка
+// всё равно выглядит случайной, а не сеткой.
+const ZONES = 4;
+const SLOTS: Slot[] = Array.from({ length: ZONES * ZONES }, (_, i) => {
+  const rnd = mulberry32(SEED + i * 911);
+  const zoneW = 100 / ZONES;
+  const zoneH = 100 / ZONES;
+  const zoneLeft = (i % ZONES) * zoneW;
+  const zoneTop = Math.floor(i / ZONES) * zoneH;
+  const baseWidth = 11 + rnd() * 9;
+  const left = zoneLeft + rnd() * (zoneW - baseWidth * 0.5) - baseWidth * 0.15;
+  const top = zoneTop + rnd() * (zoneH - baseWidth * 0.5) - baseWidth * 0.15;
+  return { left, top, baseWidth };
+});
 
-// Вертикальные колонны поверх лент — источник вертикального движения и лёгкого нахлёста.
-const LANES = [
-  { left: 24, width: 17, dir: "up", duration: 32 },
-  { left: 61, width: 16, dir: "down", duration: 38 },
-] as const;
+interface Tile {
+  photo: Pic;
+  restScale: number; // с какого масштаба плитка начинает цикл — будто уже пролетела часть пути
+  burstScale: number; // во сколько раз вырастает к концу цикла, когда улетает за экран
+  duration: number;
+  z: number;
+}
 
-const LANE_HEIGHTS = [20, 14, 24, 16, 22, 18];
-const LANE_SHIFT = LANE_HEIGHTS.reduce((a, b) => a + b, 0);
+function rollTile(pool: Pic[], rnd: () => number): Tile {
+  const restScale = 0.55 + rnd() * 0.75;
+  return {
+    photo: pool[Math.floor(rnd() * pool.length)],
+    restScale,
+    burstScale: restScale + 1.7 + rnd() * 1.6,
+    duration: 3.2 + rnd() * 3.6,
+    z: 1 + Math.floor(rnd() * 30),
+  };
+}
+
+/** Точка схождения — центр экрана: плитка растёт не сама из себя, а будто разлетается от
+ * общего центра композиции, поэтому transform-origin для каждой считаем по её позиции
+ * в раскладке, а не берём center по умолчанию (baseWidth — грубая, но достаточная оценка
+ * и для высоты: точную высоту заранее не знаем, она зависит от пропорций текущего фото). */
+function originFor(slot: Slot): string {
+  const ox = ((50 - slot.left) / slot.baseWidth) * 100;
+  const oy = ((50 - slot.top) / slot.baseWidth) * 100;
+  return `${ox}% ${oy}%`;
+}
 
 export default function WelcomeReel({ photos }: { photos: EditorialPhoto[] }) {
-  const pool: Pic[] =
-    photos.length > 0
-      ? shuffled(
-          photos.map((p) => ({ id: p.id, src: p.src, color: p.color, alt: p.alt })),
-          SEED,
-        )
-      : fallbackPics;
+  const pool = useMemo<Pic[]>(
+    () =>
+      photos.length > 0
+        ? shuffled(
+            photos.map((p) => ({ id: p.id, src: p.src, color: p.color, alt: p.alt, w: p.w, h: p.h })),
+            SEED,
+          )
+        : fallbackPics,
+    [photos],
+  );
 
   const credit = photos[0]?.credit;
 
-  // Каждому кадру во всех лентах и колоннах — своя фотография из пула, по порядку,
-  // без общего мутируемого счётчика: индекс просто продолжается от предыдущей строки.
-  const pic = (index: number) => pool[index % pool.length];
-  const rowTops = ROWS.map((_, i) => ROWS.slice(0, i).reduce((sum, r) => sum + r.height, 0));
-
   return (
-    <div className="relative h-[calc(100dvh-5rem)] w-full overflow-hidden bg-black">
+    // fixed на весь экран, а не только под хедером: хедер здесь прозрачный (см. SiteHeader.tsx,
+    // useIsWelcomeScreen), и фотографии должны залетать в том числе в его область, а не
+    // останавливаться у верхней границы.
+    <div className="fixed inset-0 h-dvh w-full overflow-hidden bg-black">
       <div className="absolute inset-0" aria-hidden>
-        {ROWS.map((row, ri) => {
-          const top = rowTops[ri];
-          const tiles = ROW_WIDTHS.map((w, wi) => ({ w, pic: pic(ri * ROW_WIDTHS.length + wi) }));
-
-          return (
-            <div key={ri} className="absolute inset-x-0 overflow-hidden" style={{ top: `${top}%`, height: `${row.height}%` }}>
-              <div
-                className="marquee-x flex h-full"
-                style={
-                  {
-                    "--shift": `${ROW_SHIFT}vw`,
-                    animationDuration: `${row.duration}s`,
-                    animationDirection: row.dir === "right" ? "reverse" : "normal",
-                  } as React.CSSProperties
-                }
-              >
-                {[...tiles, ...tiles].map((t, i) => (
-                  <div key={i} className="relative h-full shrink-0" style={{ width: `${t.w}vw`, backgroundColor: t.pic.color }}>
-                    <Image src={t.pic.src} alt={t.pic.alt} fill unoptimized sizes="25vw" className="object-cover" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })}
+        {SLOTS.map((slot, i) => (
+          <Cell key={i} index={i} slot={slot} pool={pool} />
+        ))}
       </div>
 
-      <div className="absolute inset-0 hidden sm:block" aria-hidden>
-        {LANES.map((lane, li) => {
-          const base = ROWS.length * ROW_WIDTHS.length + li * LANE_HEIGHTS.length;
-          const tiles = LANE_HEIGHTS.map((h, hi) => ({ h, pic: pic(base + hi) }));
-
-          return (
-            <div
-              key={li}
-              className="absolute inset-y-0 z-[5] overflow-hidden"
-              style={{ left: `${lane.left}vw`, width: `${lane.width}vw` }}
-            >
-              <div
-                className="marquee-y flex w-full flex-col"
-                style={
-                  {
-                    "--shift": `${LANE_SHIFT}vh`,
-                    animationDuration: `${lane.duration}s`,
-                    animationDirection: lane.dir === "down" ? "reverse" : "normal",
-                  } as React.CSSProperties
-                }
-              >
-                {[...tiles, ...tiles].map((t, i) => (
-                  <div key={i} className="relative w-full shrink-0" style={{ height: `${t.h}vh`, backgroundColor: t.pic.color }}>
-                    <Image src={t.pic.src} alt={t.pic.alt} fill unoptimized sizes="18vw" className="object-cover" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Полоса с текстом и кнопкой: не часть мозаики, поэтому лежит поверх на своём фоне-скриме */}
-      <div className="absolute inset-x-0 bottom-0 z-20 flex flex-col items-center bg-gradient-to-t from-black via-black/85 to-transparent px-4 pb-8 pt-28 text-center sm:pb-10">
-        <p className="text-[11px] uppercase tracking-[0.12em] text-ink-faint">Пока пусто</p>
-        <p className="mt-2 max-w-sm text-ink-soft">Загрузите первую плёнку — и лента начнётся с неё.</p>
+      {/* Полоса с текстом и кнопкой: не часть композиции, поэтому лежит поверх на своём фоне-скриме */}
+      <div className="absolute inset-x-0 bottom-0 z-40 flex flex-col items-center bg-gradient-to-t from-black via-black/85 to-transparent px-4 pb-8 pt-28 text-center sm:pb-10">
+        <p className="max-w-sm text-ink-soft">Загрузите первую плёнку — и лента начнётся с неё.</p>
         <Link
           href="/upload"
-          className="mt-5 flex items-center gap-1.5 rounded-full bg-ink px-6 py-2.5 text-sm text-paper transition-opacity hover:opacity-85"
+          className="mt-5 flex items-center gap-1.5 rounded-control bg-ink px-6 py-2.5 text-sm text-paper transition-opacity hover:opacity-85"
         >
           <UploadIcon width={16} height={16} />
           Загрузить кадры
@@ -145,6 +128,42 @@ export default function WelcomeReel({ photos }: { photos: EditorialPhoto[] }) {
             Фото сообщества Unsplash
           </a>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Одна ячейка коллажа: стоит на своём месте, раз в несколько секунд плавно растёт весь цикл
+ * и под конец резко улетает за экран, — и тут же возвращается на то же место с новым фото. */
+function Cell({ index, slot, pool }: { index: number; slot: Slot; pool: Pic[] }) {
+  // Первый цикл короткий и детерминированный (общий SEED): вскоре после захода на сайт
+  // почти все плитки взлетают почти разом — тот самый эффект «влетаем в стену фотографий»
+  // в момент открытия. Дальше (onAnimationEnd — уже только в браузере) циклы куда длиннее
+  // и по-настоящему случайные, чтобы взлёты не совпадали и лента жила непрерывно и вразнобой.
+  const [tile, setTile] = useState<Tile>(() => {
+    const rnd = mulberry32(SEED + index * 733);
+    const t = rollTile(pool, rnd);
+    return { ...t, duration: 0.7 + rnd() * 1.3 };
+  });
+
+  return (
+    <div className="absolute overflow-visible" style={{ left: `${slot.left}%`, top: `${slot.top}%`, width: `${slot.baseWidth}%`, zIndex: tile.z }}>
+      <div
+        key={`${tile.photo.id}-${tile.duration}`}
+        className="tile-burst relative w-full"
+        style={
+          {
+            aspectRatio: `${tile.photo.w} / ${tile.photo.h}`,
+            transformOrigin: originFor(slot),
+            "--rest-scale": tile.restScale,
+            "--burst-scale": tile.burstScale,
+            animationDuration: `${tile.duration}s`,
+            backgroundColor: tile.photo.color,
+          } as React.CSSProperties
+        }
+        onAnimationEnd={() => setTile(rollTile(pool, Math.random))}
+      >
+        <Image src={tile.photo.src} alt={tile.photo.alt} fill unoptimized sizes="20vw" className="object-contain" />
       </div>
     </div>
   );

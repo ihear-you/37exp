@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useShowNav } from "@/lib/nav";
+import { useIsWelcomeScreen, useShowNav } from "@/lib/nav";
 import { UploadIcon } from "./icons";
 
 const NAV = [
@@ -19,9 +19,12 @@ export default function SiteHeader({ hasFrames, rollCount }: { hasFrames: boolea
   const path = usePathname();
   const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
   const showNav = useShowNav(hasFrames);
+  // На пустой ленте под хедером летают фотографии (WelcomeReel, во весь экран, включая
+  // область под хедером) — хедер тогда прозрачный, чтобы это было видно, а не закрыто фоном.
+  const welcome = useIsWelcomeScreen(hasFrames);
 
   return (
-    <header className="sticky top-0 z-30 h-20 bg-paper/90 backdrop-blur-md">
+    <header className={`sticky top-0 z-30 h-20 ${welcome ? "" : "bg-paper/90 backdrop-blur-md"}`}>
       <nav className="mx-auto flex h-full max-w-[1600px] items-center px-3 md:px-5" aria-label="Основное">
         <Link
           href="/"
@@ -32,13 +35,13 @@ export default function SiteHeader({ hasFrames, rollCount }: { hasFrames: boolea
 
         {showNav && (
           <div className="ml-auto hidden items-center gap-4 md:flex">
-            <div className="flex items-center gap-0.5 rounded-full bg-paper-deep p-1">
+            <div className="flex items-center gap-0.5 rounded-control bg-paper-deep p-1">
               {NAV.map((n) => (
                 <Link
                   key={n.href}
                   href={n.href}
                   aria-current={active(n.href) ? "page" : undefined}
-                  className={`rounded-full px-3.5 py-2 text-[11px] uppercase tracking-wider transition-colors ${
+                  className={`rounded-control px-3.5 py-2 text-[11px] uppercase tracking-wider transition-colors ${
                     active(n.href) ? "bg-paper-edge text-ink" : "text-ink-faint hover:text-ink-soft"
                   }`}
                 >
@@ -50,7 +53,7 @@ export default function SiteHeader({ hasFrames, rollCount }: { hasFrames: boolea
             <Link
               href="/upload"
               aria-label="Загрузить"
-              className="flex items-center gap-1.5 rounded-full bg-ink px-3.5 py-2 text-[11px] uppercase tracking-wider text-paper transition-colors hover:bg-ink/85"
+              className="flex items-center gap-1.5 rounded-control bg-ink px-3.5 py-3 text-[11px] uppercase tracking-wider text-paper transition-colors hover:bg-ink/85"
             >
               <UploadIcon width={14} height={14} />
               <span className="hidden sm:inline">Загрузить</span>

@@ -12,7 +12,7 @@ const base = {
   "aria-hidden": true,
 } as const;
 
-/** Кассета с плёнкой: кнопка «открыть папку» в углу кадра */
+/** Кассета с плёнкой: пункт навигации «Папки» */
 export function FilmIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props}>
@@ -20,6 +20,15 @@ export function FilmIcon(props: SVGProps<SVGSVGElement>) {
       <path d="M8 8V5.5h5V8" />
       <circle cx="10.5" cy="14" r="2.6" />
       <path d="M17 12.5h3.2v4.2H17" />
+    </svg>
+  );
+}
+
+/** Папка, простой контур: кнопка «открыть папку» в углу кадра */
+export function FolderIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3 8.2A1.8 1.8 0 0 1 4.8 6.4h4.5l1.8 2.1h8.1a1.8 1.8 0 0 1 1.8 1.8v6.9a1.8 1.8 0 0 1-1.8 1.8H4.8A1.8 1.8 0 0 1 3 17.2Z" />
     </svg>
   );
 }

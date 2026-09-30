@@ -243,7 +243,7 @@ export default function UploadPrototype() {
     <div className="grid gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-12">
       {/* ── форма ── */}
       <section aria-label="Данные плёнки" className={locked ? "pointer-events-none opacity-60" : ""}>
-        <div className="mb-6 flex rounded-full p-0.5 ring-1 ring-line" role="group" aria-label="Сценарий">
+        <div className="mb-6 flex rounded-control p-0.5 ring-1 ring-line" role="group" aria-label="Сценарий">
           {(
             [
               ["new", "Новая плёнка"],
@@ -258,7 +258,7 @@ export default function UploadPrototype() {
                 setMode(id);
                 setHint(null);
               }}
-              className={`flex-1 rounded-full px-3 py-2 text-sm transition-colors ${mode === id ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"}`}
+              className={`flex-1 rounded-control px-3 py-2 text-sm transition-colors ${mode === id ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"}`}
             >
               {label}
             </button>
@@ -424,7 +424,7 @@ export default function UploadPrototype() {
 
             <ul className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-2">
               {items.map((i) => (
-                <li key={i.id} className="relative aspect-square overflow-hidden rounded-[2px] bg-paper-deep ring-1 ring-line" title={`${i.name} · ${(i.size / 1048576).toFixed(1)} МБ`}>
+                <li key={i.id} className="relative aspect-square overflow-hidden rounded-frame bg-paper-deep ring-1 ring-line" title={`${i.name} · ${(i.size / 1048576).toFixed(1)} МБ`}>
                   <Image src={i.url} alt="" fill unoptimized sizes="120px" className={`object-cover transition-opacity ${i.status === "done" || !started ? "opacity-100" : "opacity-60"}`} />
                   {started && i.status !== "done" && (
                     <div className="absolute inset-x-0 bottom-0 h-1 bg-black/15">
@@ -466,7 +466,7 @@ export default function UploadPrototype() {
             </div>
           ) : (
             <>
-              <button type="button" onClick={start} disabled={locked} className="rounded-full bg-ink px-6 py-2.5 text-sm text-paper transition-opacity hover:opacity-85 disabled:opacity-40">
+              <button type="button" onClick={start} disabled={locked} className="rounded-control bg-ink px-6 py-2.5 text-sm text-paper transition-opacity hover:opacity-85 disabled:opacity-40">
                 {locked ? "Загружается…" : items.length ? `Загрузить ${items.length} ${items.length === 1 ? "кадр" : "кадров"}` : "Загрузить"}
               </button>
               {items.length > 0 && !locked && (
@@ -491,7 +491,7 @@ export default function UploadPrototype() {
 
 const control =
   "w-full rounded-[3px] bg-paper-light px-3 py-2 text-sm ring-1 ring-line transition-shadow focus:outline-none focus:ring-2 focus:ring-ink/50";
-const ghost = "rounded-full px-4 py-2 text-sm text-ink ring-1 ring-ink/40 transition-colors hover:bg-ink hover:text-paper";
+const ghost = "rounded-control px-4 py-2 text-sm text-ink ring-1 ring-ink/40 transition-colors hover:bg-ink hover:text-paper";
 
 function Field({ label, hint, error, children }: { label: string; hint?: string; error?: boolean; children: React.ReactNode }) {
   return (
@@ -519,7 +519,7 @@ function Inline({ value, onChange, onSave, onCancel, placeholder }: { value: str
         placeholder={placeholder}
         className={control}
       />
-      <button type="button" onClick={onSave} className="rounded-full bg-ink px-4 text-sm text-paper">
+      <button type="button" onClick={onSave} className="rounded-control bg-ink px-4 text-sm text-paper">
         Добавить
       </button>
       <button type="button" onClick={onCancel} className="px-1 text-sm text-ink-soft hover:text-ink">

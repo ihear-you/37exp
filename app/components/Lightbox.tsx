@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef } from "react";
-import { feedSrc, fullSrc, type Frame, type RollView } from "@/lib/catalog";
+import { MONTHS, feedSrc, fullSrc, type Frame, type RollView } from "@/lib/catalog";
 import { ChevronIcon, CloseIcon } from "./icons";
 
 interface Props {
@@ -64,7 +64,7 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose }: Pro
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) go(dx < 0 ? 1 : -1);
   };
 
-  const meta = [roll.camera, roll.film, roll.iso ? `ISO ${roll.iso}` : null].filter(Boolean).join(" · ");
+  const info = `${roll.film} · ${MONTHS[roll.month - 1]} ${roll.year}`;
 
   return (
     <div
@@ -84,7 +84,7 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose }: Pro
           type="button"
           onClick={onClose}
           aria-label="Закрыть"
-          className="grid size-10 place-items-center rounded-full text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
+          className="grid size-10 place-items-center rounded-control text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
         >
           <CloseIcon />
         </button>
@@ -117,7 +117,7 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose }: Pro
             type="button"
             onClick={() => go(-1)}
             aria-label="Предыдущий кадр"
-            className="absolute left-2 top-1/2 grid size-11 -translate-y-1/2 place-items-center rounded-full bg-paper/80 text-ink shadow-sm ring-1 ring-line transition-colors hover:bg-ink hover:text-paper md:left-5"
+            className="absolute left-2 top-1/2 grid size-11 -translate-y-1/2 place-items-center rounded-control bg-paper/80 text-ink shadow-sm ring-1 ring-line transition-colors hover:bg-ink hover:text-paper md:left-5"
           >
             <ChevronIcon dir="left" />
           </button>
@@ -127,20 +127,19 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose }: Pro
             type="button"
             onClick={() => go(1)}
             aria-label="Следующий кадр"
-            className="absolute right-2 top-1/2 grid size-11 -translate-y-1/2 place-items-center rounded-full bg-paper/80 text-ink shadow-sm ring-1 ring-line transition-colors hover:bg-ink hover:text-paper md:right-5"
+            className="absolute right-2 top-1/2 grid size-11 -translate-y-1/2 place-items-center rounded-control bg-paper/80 text-ink shadow-sm ring-1 ring-line transition-colors hover:bg-ink hover:text-paper md:right-5"
           >
             <ChevronIcon dir="right" />
           </button>
         )}
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-baseline justify-center gap-x-4 gap-y-1 px-4 pb-5 pt-3 text-center">
-        <p className="text-sm text-ink-soft">{meta}</p>
+      <div className="flex shrink-0 justify-center px-4 pb-5 pt-3 text-center">
         <Link
           href={`/rolls/${roll.id}`}
-          className="text-sm text-accent underline decoration-accent/30 underline-offset-4 transition-colors hover:decoration-accent"
+          className="text-sm text-accent-vivid underline decoration-accent-vivid/30 underline-offset-4 transition-colors hover:decoration-accent-vivid"
         >
-          {roll.title} · открыть папку
+          {info} · открыть папку
         </Link>
       </div>
     </div>

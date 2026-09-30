@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { feedSrc, fullSrc, type Frame, type RollView } from "@/lib/catalog";
 import { planFeed, plainItems, type FeedItem } from "@/lib/feed";
 import { layoutMasonry } from "@/lib/masonry";
-import { FilmIcon } from "./icons";
+import { FilmIcon, FolderIcon } from "./icons";
 import Lightbox from "./Lightbox";
 
 interface Props {
@@ -80,7 +80,7 @@ export default function Masonry({ frames, rolls, rhythm = false, rollLink = fals
                 type="button"
                 onClick={() => setOpen(indexById.get(frame.id) ?? 0)}
                 aria-label={`${roll.title}, кадр ${frame.idx}: открыть на весь экран`}
-                className="absolute inset-0 block cursor-zoom-in overflow-hidden rounded-[2px] transition-transform duration-200 hover:-translate-y-0.5"
+                className="absolute inset-0 block cursor-zoom-in overflow-hidden rounded-frame transition-transform duration-200 hover:-translate-y-0.5"
                 style={{
                   backgroundColor: frame.color,
                   boxShadow: frame.light > 0.6 ? "var(--frame-ring-light)" : "var(--frame-ring)",
@@ -100,9 +100,9 @@ export default function Masonry({ frames, rolls, rhythm = false, rollLink = fals
                   href={`/rolls/${roll.id}`}
                   title={roll.title}
                   aria-label={`Плёнка: ${roll.title}`}
-                  className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-full bg-paper/90 text-ink shadow-sm ring-1 ring-line backdrop-blur-sm transition-colors before:absolute before:-inset-2 before:content-[''] hover:bg-ink hover:text-paper"
+                  className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-control bg-paper/90 text-ink shadow-sm ring-1 ring-line backdrop-blur-sm transition-colors before:absolute before:-inset-2 before:content-[''] hover:bg-ink hover:text-paper"
                 >
-                  <FilmIcon width={16} height={16} />
+                  <FolderIcon width={16} height={16} />
                 </Link>
               )}
             </Reveal>
@@ -162,7 +162,7 @@ function NoteTile({ roll }: { roll: RollView }) {
   return (
     <Link
       href={`/rolls/${roll.id}`}
-      className="group absolute inset-0 flex flex-col justify-end overflow-hidden rounded-[2px] bg-paper-deep p-3 ring-1 ring-line transition-colors hover:bg-paper-edge"
+      className="group absolute inset-0 flex flex-col justify-end overflow-hidden rounded-frame bg-paper-deep p-3 ring-1 ring-line transition-colors hover:bg-paper-edge"
     >
       <FilmIcon className="absolute left-3 top-3 text-ink-faint" width={16} height={16} />
       <span className="text-[15px] leading-snug text-ink-soft">{roll.title}</span>

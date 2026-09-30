@@ -11,6 +11,8 @@
   --ink-faint: #808080;
   --line: rgba(255, 255, 255, 0.16);
   --accent: #a8482a;
+  /* чуть ярче и насыщеннее --accent — только для ссылки «открыть папку» в лайтбоксе */
+  --accent-vivid: #c2572e;
 
   /* рамка вокруг кадра: тонкая светлая линия + тень в темноту, светлые кадры получают чуть больше */
   --frame-ring: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 1px 3px rgba(0, 0, 0, 0.6);
@@ -18,6 +20,11 @@
   /* та же пара, но для карточек плёнки: чуть мягче в покое, заметнее при наведении */
   --card-ring: 0 0 0 1px var(--line), 0 1px 3px rgba(0, 0, 0, 0.5);
   --card-ring-hover: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 6px 18px rgba(0, 0, 0, 0.55);
+
+  /* скругление кнопок/пилюль; у кадров (Masonry, лайтбокс, превью загрузки) — то же самое,
+     чтобы оба менялись синхронно, если понадобится ещё раз */
+  --round-control: 10px;
+  --round-frame: var(--round-control);
 }
 
 @theme inline {
@@ -30,9 +37,12 @@
   --color-ink-faint: var(--ink-faint);
   --color-line: var(--line);
   --color-accent: var(--accent);
+  --color-accent-vivid: var(--accent-vivid);
   --font-sans: var(--font-plex), -apple-system, "Segoe UI", sans-serif;
   /* только логотип: плотный чёрный гротеск, латиница и цифры */
   --font-logo: var(--font-anton), Impact, sans-serif;
+  --radius-frame: var(--round-frame);
+  --radius-control: var(--round-control);
 }
 
 html {
@@ -79,39 +89,43 @@ body {
   }
 }
 
-/* Пустая лента (см. app/components/WelcomeReel.tsx): редакционная фотомозаика — ленты
-   фотографий едут по кругу без остановки, горизонтально и вертикально, без вращения и зумов.
-   --shift — длина одного прохода ленты (сумма ширин/высот её кадров, в vw/vh), считается
-   в компоненте: ровно на неё нужно сдвинуть дублированную дорожку, чтобы петля была
-   бесшовной — % в translate() считался бы от размера самой дорожки, а не экрана. */
-@keyframes marquee-x {
-  from {
-    transform: translateX(0);
+/* Пустая лента (см. app/components/WelcomeReel.tsx): хаотичный коллаж фотографий, отдельные
+   плитки по очереди растут весь свой цикл — от --rest-scale (у части он уже больше 1, будто
+   кадр «пролетел» часть пути; у других меньше 1, и им ещё расти) до --burst-scale, с которого
+   плитка вылетает за экран и пропадает, — будто камера ныряет сквозь стену фотографий на
+   зрителя. transform-origin у каждой плитки считается в компоненте от центра экрана, а не от
+   себя самой, — поэтому рост выглядит как разлёт от общего центра, а не раздувание на месте.
+   Новое фото не выскакивает сразу на полной непрозрачности — первые 10% цикла оно мягко
+   проявляется и расфокусируется в резкость (opacity/blur — отдельно от transform, который
+   продолжает расти непрерывно все 100%, поэтому масштаб не «спотыкается» в этой точке).
+   Рост — линейный, а не ease-in: у ease-in почти весь рост приходился на последний момент,
+   середина цикла выглядела почти неподвижной, и казалось, что кадр «стоит и потом внезапно
+   размывается» — при линейном росте масштаб (а с ним и площадь кадра, которая растёт
+   быстрее самого масштаба) меняется заметно на всём протяжении цикла. */
+@keyframes tile-burst {
+  0% {
+    transform: scale(var(--rest-scale));
+    opacity: 0;
+    filter: blur(10px);
+    animation-timing-function: ease-out;
   }
-  to {
-    transform: translateX(calc(var(--shift) * -1));
+  10% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: scale(var(--burst-scale));
+    opacity: 0;
   }
 }
 
-@keyframes marquee-y {
-  from {
-    transform: translateY(0);
-  }
-  to {
-    transform: translateY(calc(var(--shift) * -1));
-  }
-}
-
-.marquee-x {
-  animation-name: marquee-x;
+.tile-burst {
+  animation-name: tile-burst;
   animation-timing-function: linear;
-  animation-iteration-count: infinite;
-}
-
-.marquee-y {
-  animation-name: marquee-y;
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
+  animation-fill-mode: both;
 }
 
 @media (prefers-reduced-motion: reduce) {

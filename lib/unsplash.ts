@@ -1,9 +1,11 @@
 // Фото для WelcomeReel (см. app/components/WelcomeReel.tsx), когда лента пуста.
 // Серверный запрос: ключ не должен попасть в клиентский бандл.
 
-// Несколько тем вместо одной — нужна разномастная подборка (город, архитектура, природа,
-// вода, горы, люди), а не только уличная съёмка.
-const QUERIES = ["night city street", "architecture minimal", "mountains nature water", "urban life people", "cars road"];
+// Motion blur — тематически в точку для WelcomeReel: кадры и так постоянно летят и
+// разгоняются, смазанные в движении фото только усиливают этот эффект. Один запрос, а не
+// несколько: демо-ключ Unsplash даёт всего 50 запросов в час, и их легко исчерпать за
+// разработку — а кэш ниже (сутки, не час) держит их подольше.
+const QUERIES = ["motion blur"];
 
 export interface EditorialPhoto {
   id: string;
@@ -29,7 +31,7 @@ interface UnsplashPhoto {
 async function searchQuery(query: string, key: string, perPage: number): Promise<UnsplashPhoto[]> {
   const res = await fetch(
     `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=${perPage}&orientation=landscape`,
-    { headers: { Authorization: `Client-ID ${key}` }, next: { revalidate: 3600 } },
+    { headers: { Authorization: `Client-ID ${key}` }, next: { revalidate: 86400 } },
   );
   if (!res.ok) return [];
   const data = (await res.json()) as { results: UnsplashPhoto[] };
@@ -37,7 +39,7 @@ async function searchQuery(query: string, key: string, perPage: number): Promise
 }
 
 /** Пусто, если ключа нет или Unsplash недоступен — вызывающий код подставит локальные кадры */
-export async function getEditorialPhotos(perQuery = 7): Promise<EditorialPhoto[]> {
+export async function getEditorialPhotos(perQuery = 30): Promise<EditorialPhoto[]> {
   const key = process.env.UNSPLASH_ACCESS_KEY;
   if (!key) return [];
 
@@ -54,7 +56,10 @@ export async function getEditorialPhotos(perQuery = 7): Promise<EditorialPhoto[]
 
     return photos.map((p) => ({
       id: p.id,
-      src: `${p.urls.raw}&w=900&q=80&fm=jpg&fit=max`,
+      // Крупнее, чем нужно для показа в покое: плитки в WelcomeReel разгоняются в несколько
+      // раз через CSS scale(), и при недостаточном разрешении исходника это выглядит как
+      // размытие — источник должен быть с запасом на самый большой момент разгона.
+      src: `${p.urls.raw}&w=1600&q=80&fm=jpg&fit=max`,
       w: p.width,
       h: p.height,
       color: p.color ?? "#d9d9d9",
