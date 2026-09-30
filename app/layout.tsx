@@ -3,7 +3,7 @@ import { Anton, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 import SiteHeader from "./components/SiteHeader";
 import BottomBarNav from "./components/BottomBarNav";
-import { FRAMES } from "@/lib/catalog";
+import { FRAMES, ROLLS } from "@/lib/catalog";
 
 // IBM Plex Sans: единственный шрифт текста на сайте — интерфейс, заголовки, названия плёнок.
 const plex = IBM_Plex_Sans({
@@ -35,9 +35,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="ru" className={`${plex.variable} ${anton.variable}`}>
       <body className="min-h-dvh flex flex-col">
-        <SiteHeader hasFrames={hasFrames} />
+        <SiteHeader hasFrames={hasFrames} rollCount={ROLLS.length} />
         <main className="flex-1">{children}</main>
-        <BottomBarNav hasFrames={hasFrames} />
+        <BottomBarNav hasFrames={hasFrames} rollCount={ROLLS.length} />
       </body>
     </html>
   );

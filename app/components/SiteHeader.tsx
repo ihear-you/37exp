@@ -15,7 +15,7 @@ const NAV = [
  * его и мешают по центру, поэтому на это время скрыты (см. useShowNav в lib/nav.ts).
  * Ниже md эти же кнопки живут в нижнем баре (BottomBarNav.tsx), поэтому здесь на мобильном
  * и планшете они тоже скрыты — остаётся только логотип. */
-export default function SiteHeader({ hasFrames }: { hasFrames: boolean }) {
+export default function SiteHeader({ hasFrames, rollCount }: { hasFrames: boolean; rollCount: number }) {
   const path = usePathname();
   const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
   const showNav = useShowNav(hasFrames);
@@ -43,6 +43,7 @@ export default function SiteHeader({ hasFrames }: { hasFrames: boolean }) {
                   }`}
                 >
                   {n.label}
+                  {n.href === "/rolls" && rollCount > 0 && <span className="ml-1.5 tabular-nums opacity-60">{rollCount}</span>}
                 </Link>
               ))}
             </div>

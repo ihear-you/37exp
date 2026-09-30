@@ -14,7 +14,7 @@ const ITEMS = [
 /** Ниже md (планшет и телефон) те же кнопки, что в шапке на десктопе, — вкладками внизу
  * экрана; та же логика показа, что и в шапке (см. useShowNav в lib/nav.ts), поэтому пока
  * кадров нет или мы на странице загрузки, бар не показывается вовсе. */
-export default function BottomBarNav({ hasFrames }: { hasFrames: boolean }) {
+export default function BottomBarNav({ hasFrames, rollCount }: { hasFrames: boolean; rollCount: number }) {
   const path = usePathname();
   const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
   const showNav = useShowNav(hasFrames);
@@ -39,7 +39,10 @@ export default function BottomBarNav({ hasFrames }: { hasFrames: boolean }) {
             }`}
           >
             <Icon width={20} height={20} />
-            {item.label}
+            <span>
+              {item.label}
+              {item.href === "/rolls" && rollCount > 0 && <span className="ml-1 tabular-nums opacity-60">{rollCount}</span>}
+            </span>
           </Link>
         );
       })}
