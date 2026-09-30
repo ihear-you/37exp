@@ -1,41 +1,43 @@
-// Режимы ленты: как отбираются и упорядочиваются кадры.
-// Цвет и яркость используются только здесь (в папках их нет).
+// Как собирается лента: обычный случайный порядок, иногда — с тёплым или холодным уклоном.
+// Уклон ничего не отбирает (все кадры остаются в ленте) — кадры одного тона просто чуть чаще
+// оказываются рядом, как если бы кто-то на глаз разложил кадры, а не отдельным «режимом».
+// Выбирается один раз на загрузку страницы, вместе с seed (см. app/components/Feed.tsx).
 
 import type { Frame } from "./catalog";
 import { mulberry32, shuffled } from "./rand";
 
-export type Mode = "shuffle" | "color" | "warm" | "cold" | "light" | "dark" | "bw";
-
-export const MODES: { id: Mode; label: string }[] = [
-  { id: "shuffle", label: "Вперемешку" },
-  { id: "color", label: "По цвету" },
-  { id: "warm", label: "Тёплые" },
-  { id: "cold", label: "Холодные" },
-  { id: "light", label: "Светлые" },
-  { id: "dark", label: "Тёмные" },
-  { id: "bw", label: "Ч/б" },
-];
-
-const isBw = (f: Frame) => f.sat < 0.07;
 const isColor = (f: Frame) => f.sat >= 0.12;
+const isWarm = (f: Frame) => isColor(f) && (f.hue <= 75 || f.hue >= 330);
+const isCold = (f: Frame) => isColor(f) && f.hue >= 90 && f.hue <= 290; // зелёный, голубой, синий, фиолетовый
 
-const MATCH: Record<Exclude<Mode, "shuffle" | "color">, (f: Frame) => boolean> = {
-  warm: (f) => isColor(f) && (f.hue <= 75 || f.hue >= 330),
-  cold: (f) => isColor(f) && f.hue >= 90 && f.hue <= 290, // зелёный, голубой, синий, фиолетовый
-  light: (f) => f.light > 0.62,
-  dark: (f) => f.light < 0.32,
-  bw: isBw,
-};
+export type Tint = "none" | "warm" | "cold";
 
-/** Отобрать кадры режима и расставить: случайно по seed, а «по цвету» по кругу оттенков */
-export function orderFrames(frames: readonly Frame[], mode: Mode, seed: number): Frame[] {
-  if (mode === "shuffle") return shuffled(frames, seed);
-  if (mode === "color") {
-    const chromatic = frames.filter((f) => !isBw(f)).sort((a, b) => a.hue - b.hue);
-    const grey = frames.filter(isBw).sort((a, b) => a.light - b.light);
-    return [...chromatic, ...grey];
+// Как часто лента при загрузке выбирает уклон вместо обычного перемешивания.
+const TINT_CHANCE: Record<Tint, number> = { none: 0.55, warm: 0.225, cold: 0.225 };
+// Насколько чаще подряд идёт кадр того же тона, чем при обычной случайности (0.5 — как без уклона).
+const TINT_WEIGHT = 0.68;
+
+export function pickTint(seed: number): Tint {
+  const r = mulberry32(seed)();
+  if (r < TINT_CHANCE.none) return "none";
+  return r < TINT_CHANCE.none + TINT_CHANCE.warm ? "warm" : "cold";
+}
+
+/** Обычный случайный порядок или лёгкий уклон в тон — без потери кадров. */
+export function orderFrames(frames: readonly Frame[], seed: number, tint: Tint): Frame[] {
+  if (tint === "none") return shuffled(frames, seed);
+  const match = tint === "warm" ? isWarm : isCold;
+  const tinted = shuffled(frames.filter(match), seed);
+  const rest = shuffled(frames.filter((f) => !match(f)), seed + 1);
+  const rnd = mulberry32(seed + 2);
+  const out: Frame[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < tinted.length || j < rest.length) {
+    const takeTinted = j >= rest.length || (i < tinted.length && rnd() < TINT_WEIGHT);
+    out.push(takeTinted ? tinted[i++] : rest[j++]);
   }
-  return shuffled(frames.filter(MATCH[mode]), seed);
+  return out;
 }
 
 // ── ритм ленты: крупные кадры и клетки с подписью плёнки ──

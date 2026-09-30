@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Anton, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 import SiteHeader from "./components/SiteHeader";
+import BottomBarNav from "./components/BottomBarNav";
+import { FRAMES } from "@/lib/catalog";
 
 // IBM Plex Sans: единственный шрифт текста на сайте — интерфейс, заголовки, названия плёнок.
 const plex = IBM_Plex_Sans({
@@ -24,15 +26,18 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#ffffff",
+  themeColor: "#0a0a0a",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
+  const hasFrames = FRAMES.length > 0;
+
   return (
     <html lang="ru" className={`${plex.variable} ${anton.variable}`}>
       <body className="min-h-dvh flex flex-col">
-        <SiteHeader />
+        <SiteHeader hasFrames={hasFrames} />
         <main className="flex-1">{children}</main>
+        <BottomBarNav hasFrames={hasFrames} />
       </body>
     </html>
   );

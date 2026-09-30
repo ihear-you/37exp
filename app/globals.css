@@ -1,23 +1,23 @@
 @import "tailwindcss";
 
-/* Белая тема. Все цвета здесь, чтобы её было легко переделать. */
+/* Тёмная тема, чёрный фон. Все цвета здесь, чтобы её было легко переделать. */
 :root {
-  --paper: #ffffff;
-  --paper-light: #ffffff;
-  --paper-deep: #f4f4f4;
-  --paper-edge: #e6e6e6;
-  --ink: #1a1a1a;
-  --ink-soft: #555555;
-  --ink-faint: #767676;
-  --line: rgba(0, 0, 0, 0.14);
+  --paper: #0a0a0a;
+  --paper-light: #121212;
+  --paper-deep: #1c1c1c;
+  --paper-edge: #2c2c2c;
+  --ink: #f2f2f2;
+  --ink-soft: #b0b0b0;
+  --ink-faint: #808080;
+  --line: rgba(255, 255, 255, 0.16);
   --accent: #a8482a;
 
-  /* рамка вокруг кадра: тонкая линия + мягкая тень, светлые кадры получают чуть больше */
-  --frame-ring: 0 0 0 1px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.1);
-  --frame-ring-light: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.14);
+  /* рамка вокруг кадра: тонкая светлая линия + тень в темноту, светлые кадры получают чуть больше */
+  --frame-ring: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 1px 3px rgba(0, 0, 0, 0.6);
+  --frame-ring-light: 0 0 0 1px rgba(255, 255, 255, 0.22), 0 2px 8px rgba(0, 0, 0, 0.6);
   /* та же пара, но для карточек плёнки: чуть мягче в покое, заметнее при наведении */
-  --card-ring: 0 0 0 1px var(--line), 0 1px 3px rgba(0, 0, 0, 0.08);
-  --card-ring-hover: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.12);
+  --card-ring: 0 0 0 1px var(--line), 0 1px 3px rgba(0, 0, 0, 0.5);
+  --card-ring-hover: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 6px 18px rgba(0, 0, 0, 0.55);
 }
 
 @theme inline {
@@ -38,7 +38,7 @@
 html {
   background: var(--paper);
   color: var(--ink);
-  scroll-padding-top: 4rem;
+  scroll-padding-top: 5rem;
 }
 
 body {
@@ -77,6 +77,41 @@ body {
   to {
     opacity: 1;
   }
+}
+
+/* Пустая лента (см. app/components/WelcomeReel.tsx): редакционная фотомозаика — ленты
+   фотографий едут по кругу без остановки, горизонтально и вертикально, без вращения и зумов.
+   --shift — длина одного прохода ленты (сумма ширин/высот её кадров, в vw/vh), считается
+   в компоненте: ровно на неё нужно сдвинуть дублированную дорожку, чтобы петля была
+   бесшовной — % в translate() считался бы от размера самой дорожки, а не экрана. */
+@keyframes marquee-x {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(var(--shift) * -1));
+  }
+}
+
+@keyframes marquee-y {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(calc(var(--shift) * -1));
+  }
+}
+
+.marquee-x {
+  animation-name: marquee-x;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.marquee-y {
+  animation-name: marquee-y;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -2,7 +2,8 @@
 
 import { useSyncExternalStore } from "react";
 
-// Маленькое хранилище поверх sessionStorage / localStorage.
+// Маленькое хранилище поверх sessionStorage / localStorage — или только в памяти вкладки
+// (kind "memory"): ничего не сохраняет, значение живёт до следующей полной загрузки страницы.
 // На сервере и при первой отрисовке отдаёт запасное значение, поэтому гидрация не расходится.
 
 export interface Store<T> {
@@ -13,7 +14,7 @@ export interface Store<T> {
 
 export function createStore<T extends object>(
   key: string,
-  kind: "session" | "local",
+  kind: "session" | "local" | "memory",
   init: () => T,
 ): Store<T> {
   let cache: T | undefined;
@@ -21,6 +22,7 @@ export function createStore<T extends object>(
   const area = () => (kind === "session" ? window.sessionStorage : window.localStorage);
 
   const save = (v: T) => {
+    if (kind === "memory") return;
     try {
       area().setItem(key, JSON.stringify(v));
     } catch {
@@ -32,11 +34,13 @@ export function createStore<T extends object>(
     get() {
       if (cache) return cache;
       let v: T | undefined;
-      try {
-        const raw = area().getItem(key);
-        if (raw) v = { ...init(), ...JSON.parse(raw) };
-      } catch {
-        // повреждённое значение игнорируем
+      if (kind !== "memory") {
+        try {
+          const raw = area().getItem(key);
+          if (raw) v = { ...init(), ...JSON.parse(raw) };
+        } catch {
+          // повреждённое значение игнорируем
+        }
       }
       if (!v) {
         v = init();

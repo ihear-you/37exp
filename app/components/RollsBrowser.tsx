@@ -48,7 +48,7 @@ export default function RollsBrowser({ rolls }: { rolls: RollCard[] }) {
 
   return (
     <div>
-      <div className="sticky top-14 z-20 -mx-3 border-b border-line/60 bg-paper/90 px-3 py-2.5 backdrop-blur-md md:-mx-5 md:px-5">
+      <div className="sticky top-20 z-20 -mx-3 border-b border-line/60 bg-paper/90 px-3 py-2.5 backdrop-blur-md md:-mx-5 md:px-5">
         <div className="flex items-center gap-3">
           <div className="no-scrollbar -my-1 flex min-w-0 flex-1 gap-1.5 overflow-x-auto py-1" role="group" aria-label="Камера">
             <Chip active={!camera} onClick={() => setCamera("")}>
