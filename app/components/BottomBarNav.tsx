@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useShowNav } from "@/lib/nav";
-import { GridIcon, FilmIcon, UploadIcon } from "./icons";
+import { GridIcon, FolderIcon, UploadIcon } from "./icons";
 
 const ITEMS = [
   { href: "/", label: "Лента", icon: GridIcon },
-  { href: "/rolls", label: "Папки", icon: FilmIcon },
+  { href: "/rolls", label: "Папки", icon: FolderIcon },
   { href: "/upload", label: "Загрузить", icon: UploadIcon },
 ];
 
