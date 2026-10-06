@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { feedSrc, fullSrc, type Frame, type RollView } from "@/lib/catalog";
 import { planFeed, plainItems, type FeedItem } from "@/lib/feed";
 import { layoutMasonry } from "@/lib/masonry";
-import { FilmIcon, FolderIcon } from "./icons";
+import { FolderIcon } from "./icons";
 import Lightbox from "./Lightbox";
 
 interface Props {
@@ -20,6 +20,8 @@ interface Props {
   seed?: number;
   /** Смена значения раскладывает кадры заново и заново проигрывает их появление (режим, перемешивание) */
   resetKey?: string;
+  /** Страница папки: в лайтбоксе появляется «Удалить» для кадра */
+  onDeleteFrame?: (id: string) => void;
 }
 
 const DESKTOP = 768; // от этой ширины 4 колонки, ниже 2
@@ -38,13 +40,13 @@ function useElementWidth() {
   return [ref, width] as const;
 }
 
-export default function Masonry({ frames, rolls, rhythm = false, rollLink = false, seed = 1, resetKey }: Props) {
+export default function Masonry({ frames, rolls, rhythm = false, rollLink = false, seed = 1, resetKey, onDeleteFrame }: Props) {
   const [ref, width] = useElementWidth();
   const [open, setOpen] = useState<number | null>(null);
 
   const desktop = width >= DESKTOP;
   const cols = desktop ? 4 : 2;
-  const gap = desktop ? 14 : 8;
+  const gap = 16;
 
   const layout = useMemo(() => {
     if (!width) return null;
@@ -110,7 +112,7 @@ export default function Masonry({ frames, rolls, rhythm = false, rollLink = fals
         })}
       </div>
 
-      {open !== null && <Lightbox frames={frames} rolls={rolls} index={open} onIndex={setOpen} onClose={close} />}
+      {open !== null && <Lightbox frames={frames} rolls={rolls} index={open} onIndex={setOpen} onClose={close} onDelete={onDeleteFrame} />}
     </div>
   );
 }
@@ -164,10 +166,9 @@ function NoteTile({ roll }: { roll: RollView }) {
       href={`/rolls/${roll.id}`}
       className="group absolute inset-0 flex flex-col justify-end overflow-hidden rounded-frame bg-paper-deep p-3 ring-1 ring-line transition-colors hover:bg-paper-edge"
     >
-      <FilmIcon className="absolute left-3 top-3 text-ink-faint" width={16} height={16} />
       <span className="text-[15px] leading-snug text-ink-soft">{roll.title}</span>
       <span className="mt-1 text-[11px] uppercase tracking-[0.12em] text-ink-faint transition-colors group-hover:text-accent">
-        {roll.count} кадров · открыть →
+        открыть папку →
       </span>
     </Link>
   );

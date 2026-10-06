@@ -45,3 +45,6 @@ next-env.d.ts
 /photolab.db-*
 /public/uploads/*
 !/public/uploads/.gitkeep
+
+# исходники анимации и видео в корне
+/*.mov

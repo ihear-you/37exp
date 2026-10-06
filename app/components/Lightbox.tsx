@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MONTHS, feedSrc, fullSrc, type Frame, type RollView } from "@/lib/catalog";
-import { ChevronIcon, CloseIcon } from "./icons";
+import { ChevronIcon, CloseIcon, TrashIcon } from "./icons";
 
 interface Props {
   frames: readonly Frame[];
@@ -11,12 +11,16 @@ interface Props {
   index: number;
   onIndex: (i: number) => void;
   onClose: () => void;
+  /** Если задан, в верхней панели есть «Удалить» (с подтверждением) */
+  onDelete?: (id: string) => void;
 }
 
 /** Кадр на весь экран: стрелки, клавиши и свайп; подпись с камерой, плёнкой, ISO и ссылкой на папку */
-export default function Lightbox({ frames, rolls, index, onIndex, onClose }: Props) {
-  const frame = frames[index];
-  const roll = rolls[frame.roll];
+export default function Lightbox({ frames, rolls, index, onIndex, onClose, onDelete }: Props) {
+  const [confirming, setConfirming] = useState(false);
+  // после удаления последнего кадра списка индекс может выйти за край, пока родитель не обновился
+  const frame = frames[Math.min(index, frames.length - 1)];
+  const roll = frame ? rolls[frame.roll] : undefined;
   const dialog = useRef<HTMLDivElement>(null);
   const touch = useRef<{ x: number; y: number } | null>(null);
 
@@ -52,6 +56,15 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose }: Pro
     }
   }, [index, frames]);
 
+  const remove = () => {
+    if (!onDelete || !frame) return;
+    setConfirming(false);
+    onDelete(frame.id);
+    // на месте удалённого встаёт следующий кадр, а если он был последним, то предыдущий
+    if (frames.length <= 1) onClose();
+    else onIndex(Math.min(index, frames.length - 2));
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     touch.current = { x: e.clientX, y: e.clientY };
   };
@@ -63,6 +76,8 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose }: Pro
     const dy = e.clientY - s.y;
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) go(dx < 0 ? 1 : -1);
   };
+
+  if (!frame || !roll) return null;
 
   const info = `${roll.film} · ${MONTHS[roll.month - 1]} ${roll.year}`;
 
@@ -80,14 +95,38 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose }: Pro
         <span className="text-sm tabular-nums text-ink-faint">
           {index + 1} / {frames.length}
         </span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Закрыть"
-          className="grid size-10 place-items-center rounded-control text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
-        >
-          <CloseIcon />
-        </button>
+        <div className="flex items-center gap-1">
+          {onDelete &&
+            (confirming ? (
+              <>
+                <span className="mr-1 text-sm text-ink-soft">Удалить кадр?</span>
+                <button type="button" onClick={remove} className="rounded-control px-3 py-2 text-sm text-accent-vivid transition-colors hover:bg-paper-deep">
+                  Да, удалить
+                </button>
+                <button type="button" onClick={() => setConfirming(false)} className="rounded-control px-3 py-2 text-sm text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink">
+                  Отмена
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                aria-label="Удалить кадр"
+                title="Удалить кадр"
+                className="grid size-10 place-items-center rounded-control text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
+              >
+                <TrashIcon />
+              </button>
+            ))}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Закрыть"
+            className="grid size-10 place-items-center rounded-control text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
+          >
+            <CloseIcon />
+          </button>
+        </div>
       </div>
 
       <div
