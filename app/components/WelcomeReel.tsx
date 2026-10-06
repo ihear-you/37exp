@@ -109,26 +109,28 @@ export default function WelcomeReel({ photos }: { photos: EditorialPhoto[] }) {
       </div>
 
       {/* Полоса с текстом и кнопкой: не часть композиции, поэтому лежит поверх на своём фоне-скриме */}
-      <div className="absolute inset-x-0 bottom-0 z-40 flex flex-col items-center bg-gradient-to-t from-black via-black/85 to-transparent px-4 pb-8 pt-28 text-center sm:pb-10">
-        <p className="max-w-sm text-ink-soft">Загрузите первую плёнку — и лента начнётся с неё.</p>
+      <div className="absolute inset-x-0 bottom-0 z-40 flex flex-col items-center bg-gradient-to-t from-black via-black/85 to-transparent px-4 pb-[52px] pt-28 text-center sm:pb-[60px]">
+        <p className="max-w-sm text-ink-soft">Соберите архив и смотрите кадры в удобном формате</p>
         <Link
           href="/upload"
           className="mt-5 flex items-center gap-1.5 rounded-control bg-ink px-6 py-2.5 text-sm text-paper transition-opacity hover:opacity-85"
         >
           <UploadIcon width={16} height={16} />
-          Загрузить кадры
+          Загрузить первую плёнку
         </Link>
-        {credit && (
-          <a
-            href="https://unsplash.com/?utm_source=photo-lab&utm_medium=referral"
-            target="_blank"
-            rel="noreferrer"
-            className="mt-6 text-[11px] text-ink-faint transition-colors hover:text-ink-soft"
-          >
-            Фото сообщества Unsplash
-          </a>
-        )}
       </div>
+
+      {/* Подпись Unsplash — в правом нижнем углу, с тем же отступом от края, что у логотипа слева */}
+      {credit && (
+        <a
+          href="https://unsplash.com/?utm_source=photo-lab&utm_medium=referral"
+          target="_blank"
+          rel="noreferrer"
+          className="absolute bottom-3 right-0 z-40 px-3 text-[11px] text-ink-faint transition-colors hover:text-ink-soft md:px-5"
+        >
+          Фото сообщества Unsplash
+        </a>
+      )}
     </div>
   );
 }

@@ -100,7 +100,7 @@ export default function Masonry({ frames, rolls, rhythm = false, rollLink = fals
                   href={`/rolls/${roll.id}`}
                   title={roll.title}
                   aria-label={`Плёнка: ${roll.title}`}
-                  className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-control bg-paper/90 text-ink shadow-sm ring-1 ring-line backdrop-blur-sm transition-colors before:absolute before:-inset-2 before:content-[''] hover:bg-ink hover:text-paper"
+                  className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-[max(0px,calc(var(--round-frame)_-_0.375rem))] bg-paper/90 text-ink shadow-sm ring-1 ring-line backdrop-blur-sm transition-colors before:absolute before:-inset-2 before:content-[''] hover:bg-ink hover:text-paper"
                 >
                   <FolderIcon width={16} height={16} />
                 </Link>
