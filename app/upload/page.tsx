@@ -10,13 +10,7 @@ export default function UploadPage() {
       <div className="mb-4">
         <BackButton />
       </div>
-      <h1 className="text-[26px] leading-tight md:text-[36px]">Загрузка плёнки</h1>
-      <p className="mt-3 max-w-2xl text-ink-soft">
-        В прототипе кадры никуда не отправляются: форма и прогресс показывают, как это будет выглядеть.
-      </p>
-      <div className="mt-8 md:mt-10">
-        <UploadPrototype />
-      </div>
+      <UploadPrototype />
     </div>
   );
 }
