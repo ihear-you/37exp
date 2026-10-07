@@ -19,12 +19,11 @@ import {
 } from "@/lib/catalog";
 import { editsStore, EDITS_FALLBACK, type RollEdit } from "@/lib/roll-edits";
 import { useStore } from "@/lib/persist";
+import { control, Select } from "./fields";
 import Masonry from "./Masonry";
 import RollDescription from "./RollDescription";
 import RollIsland from "./RollIsland";
 
-const control =
-  "w-full rounded-control bg-paper-light px-3 py-2 text-sm ring-1 ring-line transition-shadow focus:outline-none focus:ring-2 focus:ring-ink/50";
 const button = "rounded-control px-3.5 py-2 text-[11px] uppercase tracking-wider transition-colors";
 
 /** Верх страницы папки (название, описание), кадры и остров с фактами, плюс правка папки на месте.
@@ -136,60 +135,60 @@ function EditPanel({ current, title, onSave, onCancel }: { current: Roll; title:
       <div className="grid grid-cols-2 gap-x-3 gap-y-4">
         <div className="col-span-2">
         <Field label="Плёнка">
-          <select className={control} value={draft.filmId} onChange={(e) => set("filmId", e.target.value)}>
+          <Select value={draft.filmId} onChange={(e) => set("filmId", e.target.value)}>
             {FILMS.map((f) => (
               <option key={f.id} value={f.id}>
                 {filmLabel(f)}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         </div>
         <div className="col-span-2">
         <Field label="Камера">
-          <select className={control} value={draft.cameraId} onChange={(e) => set("cameraId", e.target.value)}>
+          <Select value={draft.cameraId} onChange={(e) => set("cameraId", e.target.value)}>
             {!findCamera(draft.cameraId) && <option value={draft.cameraId}>{draft.cameraId}</option>}
             {CAMERAS.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         </div>
         <Field label="Формат">
-          <select className={control} value={draft.format} onChange={(e) => set("format", e.target.value as Format)}>
+          <Select value={draft.format} onChange={(e) => set("format", e.target.value as Format)}>
             <option value="35">35 мм</option>
             <option value="120">120</option>
-          </select>
+          </Select>
         </Field>
         <Field label="ISO съёмки">
-          <select className={control} value={draft.iso ?? ""} onChange={(e) => set("iso", e.target.value ? Number(e.target.value) : null)}>
+          <Select value={draft.iso ?? ""} onChange={(e) => set("iso", e.target.value ? Number(e.target.value) : null)}>
             <option value="">не указано</option>
             {isos.map((v) => (
               <option key={v} value={v}>
                 {v}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label="Месяц начала съёмки">
-          <select className={control} value={draft.month} onChange={(e) => set("month", Number(e.target.value))}>
+          <Select value={draft.month} onChange={(e) => set("month", Number(e.target.value))}>
             {MONTHS.map((m, i) => (
               <option key={m} value={i + 1}>
                 {m}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label="Год">
-          <select className={control} value={draft.year} onChange={(e) => set("year", Number(e.target.value))}>
+          <Select value={draft.year} onChange={(e) => set("year", Number(e.target.value))}>
             {years.map((y) => (
               <option key={y} value={y}>
                 {y}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
       </div>
 
