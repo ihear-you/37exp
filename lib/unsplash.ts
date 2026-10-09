@@ -38,8 +38,10 @@ async function searchQuery(query: string, key: string, perPage: number): Promise
   return data.results;
 }
 
-/** Пусто, если ключа нет или Unsplash недоступен — вызывающий код подставит локальные кадры */
-export async function getEditorialPhotos(perQuery = 30): Promise<EditorialPhoto[]> {
+/** Пусто, если ключа нет или Unsplash недоступен — вызывающий код подставит локальные кадры.
+ * Пул 20, а не 30: на первом экране плитки берут ~12 разных кадров, а за первые секунды после
+ * первой смены в плитки попадает почти весь пул — лишние кадры только грузят канал. */
+export async function getEditorialPhotos(perQuery = 20): Promise<EditorialPhoto[]> {
   const key = process.env.UNSPLASH_ACCESS_KEY;
   if (!key) return [];
 
@@ -58,8 +60,10 @@ export async function getEditorialPhotos(perQuery = 30): Promise<EditorialPhoto[
       id: p.id,
       // Крупнее, чем нужно для показа в покое: плитки в WelcomeReel разгоняются в несколько
       // раз через CSS scale(), и при недостаточном разрешении исходника это выглядит как
-      // размытие — источник должен быть с запасом на самый большой момент разгона.
-      src: `${p.urls.raw}&w=1600&q=80&fm=jpg&fit=max`,
+      // размытие. 1200 — компромисс с весом: в покое хватает с большим запасом, а в самом
+      // конце разгона на Retina-ноутбуке кадр растянут примерно вдвое, но к этому моменту он
+      // уже уходит в прозрачность. Замер: w=1600 — 169 КБ в среднем, w=1200 — ~97 КБ.
+      src: `${p.urls.raw}&w=1200&q=70&fm=jpg&fit=max`,
       w: p.width,
       h: p.height,
       color: p.color ?? "#d9d9d9",
