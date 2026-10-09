@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { FRAMES, feedSrc } from "@/lib/catalog";
+import { FRAMES } from "@/lib/catalog";
 import { mulberry32, shuffled } from "@/lib/rand";
 import type { EditorialPhoto } from "@/lib/unsplash";
 import { UploadIcon } from "./icons";
@@ -28,9 +28,12 @@ interface Pic {
   h: number;
 }
 
+// Запасной вариант, когда фото Unsplash недоступны: плитки цвета кадров без картинок. Сами кадры не запрашиваем:
+// они лежат у владельцев и закрыты, а запросы к ним на каждой смене плитки сыпали бы 404 на сервер.
+const BLANK = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
 const fallbackPics: Pic[] = shuffled(FRAMES, SEED)
   .slice(0, 30)
-  .map((f) => ({ id: f.id, src: feedSrc(f.id), color: f.color, alt: "", w: f.w, h: f.h }));
+  .map((f) => ({ id: f.id, src: BLANK, color: f.color, alt: "", w: f.w, h: f.h }));
 
 interface Slot {
   left: number;

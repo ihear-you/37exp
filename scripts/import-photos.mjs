@@ -1,10 +1,11 @@
 // Импорт настоящих кадров в прототип: «представим, что они уже загружены».
 // Запуск: npm run import
 //
-// Для каждого кадра делаются две копии: облегчённая для ленты (public/photos/f)
-// и крупная для просмотра на весь экран (public/photos/l). Поворот берётся из EXIF.
+// Для каждого кадра делаются две копии: облегчённая для ленты (seed/photos/f)
+// и крупная для просмотра на весь экран (seed/photos/l). Поворот берётся из EXIF.
 // Цвет и яркость считаются по готовой картинке, так же как это будет при загрузке.
 // Оригиналы остаются на месте и в проект не копируются.
+// Файлы лежат в seed/photos (не в public): на сайт они попадают через проверку доступа (app/photos).
 // Результат: lib/photos/frames.json. Данные о плёнках (камера, дата, описание) лежат в lib/catalog.ts.
 
 import sharp from "sharp";
@@ -23,8 +24,8 @@ const SOURCES = [
 const LONG_FEED = 900;
 const LONG_FULL = 2000;
 
-const DIR_FEED = path.join(ROOT, "public/photos/f");
-const DIR_FULL = path.join(ROOT, "public/photos/l");
+const DIR_FEED = path.join(ROOT, "seed/photos/f");
+const DIR_FULL = path.join(ROOT, "seed/photos/l");
 const OUT_JSON = path.join(ROOT, "lib/photos/frames.json");
 
 /** Цвет и яркость по уменьшенной картинке 24×24 */
@@ -72,7 +73,7 @@ function analyze(raw) {
   };
 }
 
-rmSync(path.join(ROOT, "public/photos"), { recursive: true, force: true });
+rmSync(path.join(ROOT, "seed/photos"), { recursive: true, force: true });
 mkdirSync(DIR_FEED, { recursive: true });
 mkdirSync(DIR_FULL, { recursive: true });
 mkdirSync(path.dirname(OUT_JSON), { recursive: true });

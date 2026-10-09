@@ -1,5 +1,7 @@
-// Справочники и плёнки прототипа.
-// В настоящем сайте это будет лежать в базе; формы данных повторяют бриф.
+// Типы, справочник плёнок и подписи. Сами плёнки, камеры и кадры лежат в базе (lib/db/),
+// а ROLLS, CAMERAS и FRAMES ниже — стартовые данные: из них база заполняется при первом запуске
+// (lib/db/seed.ts), и ещё их пока читают прототип загрузки и пустая лента.
+// Страницы ленты, папок и плёнки берут данные из lib/db, а не отсюда.
 
 import framesJson from "./photos/frames.json";
 
@@ -17,6 +19,15 @@ export interface Film {
   synonyms: string[];
 }
 
+/** Кто видит плёнку: только автор, любой по ссылке со своим ключом, или все (в том числе в списке на странице автора) */
+export type Visibility = "private" | "link" | "public";
+
+export const VISIBILITIES: { id: Visibility; label: string }[] = [
+  { id: "private", label: "Только я" },
+  { id: "link", label: "Все, у кого есть ссылка" },
+  { id: "public", label: "Все (видна на моей странице)" },
+];
+
 export interface Camera {
   id: string;
   name: string;
@@ -32,6 +43,25 @@ export interface Roll {
   year: number;
   month: number;
   description: string;
+  /** Своё название; без него название собирается из плёнки, даты и ISO */
+  title?: string | null;
+  /** Без значения считается «только я» */
+  visibility?: Visibility;
+  /** Ключ для ссылки; приходит на клиент только к автору плёнки */
+  shareKey?: string;
+}
+
+/** Правка плёнки из формы «Изменить» */
+export interface RollEdit {
+  visibility: Visibility;
+  title: string | null;
+  description: string;
+  filmId: string;
+  cameraId: string;
+  iso: number | null;
+  format: Format;
+  month: number;
+  year: number;
 }
 
 export interface Frame {
@@ -84,8 +114,8 @@ export const FRAMES = framesJson as Frame[];
 
 // ── названия и подписи ──
 
-export const findFilm = (id: string) => FILMS.find((f) => f.id === id) ?? FILMS[0];
-export const findCamera = (id: string) => CAMERAS.find((c) => c.id === id);
+/** films: справочник плюс свои плёнки пользователя */
+export const findFilm = (id: string, films: readonly Film[] = FILMS) => films.find((f) => f.id === id) ?? FILMS[0];
 
 export function filmLabel(f: Film) {
   return f.note ? `${f.name} (${f.note})` : f.name;
@@ -99,17 +129,14 @@ export function makeTitle(film: Film, month: number, year: number, iso: number |
   return parts.join(" · ");
 }
 
-export function rollTitle(r: Roll) {
-  return makeTitle(findFilm(r.filmId), r.month, r.year, r.iso);
+export function rollTitle(r: Roll, films: readonly Film[] = FILMS) {
+  return r.title || makeTitle(findFilm(r.filmId, films), r.month, r.year, r.iso);
 }
 
 export const formatLabel = (f: Format) => (f === "35" ? "35 мм" : "120, средний формат");
 
 /** Для сортировки по дате */
-export const rollDate = (r: Roll) => r.year * 12 + r.month;
-
-export const framesOfRoll = (rollId: number) =>
-  FRAMES.filter((f) => f.roll === rollId).sort((a, b) => a.idx - b.idx);
+export const rollDate = (r: { year: number; month: number }) => r.year * 12 + r.month;
 
 export const feedSrc = (id: string) => `/photos/f/${id}.jpg`;
 export const fullSrc = (id: string) => `/photos/l/${id}.jpg`;
@@ -130,13 +157,13 @@ export interface RollView {
   count: number;
 }
 
-export function rollView(r: Roll): RollView {
-  const film = findFilm(r.filmId);
+export function rollView(r: Roll, cameras: readonly Camera[], count: number, films: readonly Film[] = FILMS): RollView {
+  const film = findFilm(r.filmId, films);
   return {
     id: r.id,
-    title: rollTitle(r),
+    title: rollTitle(r, films),
     film: film.id === UNKNOWN_FILM ? "Плёнка не указана" : film.name,
-    camera: findCamera(r.cameraId)?.name ?? "",
+    camera: cameras.find((c) => c.id === r.cameraId)?.name ?? "",
     cameraId: r.cameraId,
     filmId: r.filmId,
     iso: r.iso,
@@ -144,12 +171,6 @@ export function rollView(r: Roll): RollView {
     year: r.year,
     month: r.month,
     description: r.description,
-    count: FRAMES.filter((f) => f.roll === r.id).length,
+    count,
   };
-}
-
-export const allRollViews = () => ROLLS.map(rollView);
-
-export function rollViewsById(): Record<number, RollView> {
-  return Object.fromEntries(allRollViews().map((r) => [r.id, r]));
 }

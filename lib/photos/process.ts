@@ -1,0 +1,87 @@
+import sharp from "sharp";
+
+// Обработка загруженного кадра: поворот по EXIF, копии для ленты и для просмотра на весь экран,
+// цвет и яркость для ленты. Те же размеры и качество, что у scripts/import-photos.mjs.
+
+const LONG_FEED = 900;
+const LONG_FULL = 2000;
+const MAX_PIXELS = 400_000_000; // защита от «бомб»: огромных по размеру картинок
+
+export interface Processed {
+  /** Формат исходника: jpeg, png, tiff, webp… */
+  format: string;
+  feed: Buffer;
+  full: Buffer;
+  w: number;
+  h: number;
+  hue: number;
+  sat: number;
+  light: number;
+  color: string;
+}
+
+/** Кидает ошибку, если файл не картинка или не читается */
+export async function processPhoto(input: Buffer): Promise<Processed> {
+  // поворот по EXIF применяем один раз, дальше работаем с уже «прямой» картинкой
+  const source = sharp(input, { limitInputPixels: MAX_PIXELS });
+  const format = (await source.metadata()).format ?? "";
+  const upright = await source.rotate().toBuffer();
+
+  const full = await sharp(upright)
+    .resize({ width: LONG_FULL, height: LONG_FULL, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 80, mozjpeg: true })
+    .toBuffer();
+  const feed = await sharp(upright)
+    .resize({ width: LONG_FEED, height: LONG_FEED, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 78, mozjpeg: true })
+    .toBuffer();
+
+  const { width, height } = await sharp(feed).metadata();
+  const raw = await sharp(feed).resize(24, 24, { fit: "fill" }).removeAlpha().raw().toBuffer();
+  return { format, feed, full, w: width, h: height, ...analyze(raw) };
+}
+
+/** Цвет и яркость по уменьшенной картинке 24×24 */
+function analyze(raw: Buffer) {
+  let x = 0;
+  let y = 0;
+  let sumS = 0;
+  let sumL = 0;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  const n = raw.length / 3;
+  for (let i = 0; i < n; i++) {
+    const R = raw[i * 3] / 255;
+    const G = raw[i * 3 + 1] / 255;
+    const B = raw[i * 3 + 2] / 255;
+    r += raw[i * 3];
+    g += raw[i * 3 + 1];
+    b += raw[i * 3 + 2];
+    const mx = Math.max(R, G, B);
+    const mn = Math.min(R, G, B);
+    const d = mx - mn;
+    const l = (mx + mn) / 2;
+    const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    let h = 0;
+    if (d !== 0) {
+      if (mx === R) h = ((G - B) / d) % 6;
+      else if (mx === G) h = (B - R) / d + 2;
+      else h = (R - G) / d + 4;
+      h *= 60;
+    }
+    const rad = (h * Math.PI) / 180;
+    x += Math.cos(rad) * s;
+    y += Math.sin(rad) * s;
+    sumS += s;
+    sumL += 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  }
+  const hue = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+  const hex = [r, g, b].map((v) => Math.round(v / n).toString(16).padStart(2, "0")).join("");
+  return {
+    hue: Math.round(hue),
+    sat: +(sumS / n).toFixed(3),
+    light: +(sumL / n).toFixed(3),
+    color: `#${hex}`,
+  };
+}

@@ -48,3 +48,12 @@ next-env.d.ts
 
 # исходники анимации и видео в корне
 /*.mov
+
+# локальная база (lib/db)
+/data/*.db
+/data/*.db-*
+
+!.env.example
+
+# загруженные кадры (lib/storage)
+/storage/

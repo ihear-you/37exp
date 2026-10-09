@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useIsWelcomeScreen, useShowNav } from "@/lib/nav";
 import { UploadIcon } from "./icons";
+import UserMenu, { type MenuUser } from "./UserMenu";
 
 const NAV = [
   { href: "/", label: "Лента" },
@@ -15,7 +16,7 @@ const NAV = [
  * его и мешают по центру, поэтому на это время скрыты (см. useShowNav в lib/nav.ts).
  * Ниже md эти же кнопки живут в нижнем баре (BottomBarNav.tsx), поэтому здесь на мобильном
  * и планшете они тоже скрыты — остаётся только логотип. */
-export default function SiteHeader({ hasFrames, rollCount }: { hasFrames: boolean; rollCount: number }) {
+export default function SiteHeader({ hasFrames, rollCount, user }: { hasFrames: boolean; rollCount: number; user: MenuUser | null }) {
   const path = usePathname();
   const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
   const showNav = useShowNav(hasFrames);
@@ -60,6 +61,11 @@ export default function SiteHeader({ hasFrames, rollCount }: { hasFrames: boolea
             </Link>
           </div>
         )}
+
+        {/* аватар с выходом (или «Войти») виден всегда, в том числе на телефоне и на пустой ленте */}
+        <div className={showNav ? "ml-auto md:ml-4" : "ml-auto"}>
+          <UserMenu user={user} />
+        </div>
       </nav>
     </header>
   );

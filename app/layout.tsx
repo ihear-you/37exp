@@ -3,7 +3,8 @@ import { Anton, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 import SiteHeader from "./components/SiteHeader";
 import BottomBarNav from "./components/BottomBarNav";
-import { FRAMES, ROLLS } from "@/lib/catalog";
+import { getViewer } from "@/lib/auth/session";
+import { getMyCounts } from "@/lib/db";
 
 // IBM Plex Sans: единственный шрифт текста на сайте — интерфейс, заголовки, названия плёнок.
 const plex = IBM_Plex_Sans({
@@ -29,15 +30,22 @@ export const viewport: Viewport = {
   themeColor: "#0a0a0a",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
-  const hasFrames = FRAMES.length > 0;
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // кадры и плёнки в шапке: свои у вошедшего, а зритель без входа ничего своего не имеет
+  const viewer = await getViewer();
+  const counts = viewer ? await getMyCounts(viewer.id) : { rolls: 0, frames: 0 };
+  const hasFrames = counts.frames > 0;
 
   return (
     <html lang="ru" className={`${plex.variable} ${anton.variable}`}>
       <body className="min-h-dvh flex flex-col">
-        <SiteHeader hasFrames={hasFrames} rollCount={ROLLS.length} />
+        <SiteHeader
+          hasFrames={hasFrames}
+          rollCount={counts.rolls}
+          user={viewer ? { name: viewer.name, handle: viewer.handle, avatarUrl: viewer.avatarUrl } : null}
+        />
         <main className="flex-1">{children}</main>
-        <BottomBarNav hasFrames={hasFrames} rollCount={ROLLS.length} />
+        <BottomBarNav hasFrames={hasFrames} rollCount={counts.rolls} />
       </body>
     </html>
   );

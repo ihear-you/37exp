@@ -2,31 +2,39 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  CAMERAS,
-  FILMS,
-  ISO_VALUES,
-  MONTHS,
-  ROLLS,
-  filmLabel,
-  makeTitle,
-  rollTitle,
-  type Camera,
-  type Film,
-  type Format,
-} from "@/lib/catalog";
+import { ISO_VALUES, MONTHS, filmLabel, makeTitle, type Camera, type Film, type Format } from "@/lib/catalog";
 import { parseFolderName } from "@/lib/folder-name";
 import { createStore, useStore } from "@/lib/persist";
+import { createCameraAction, createFilmAction, startUploadAction } from "../upload/actions";
 import { CheckIcon, RetryIcon, UploadIcon } from "./icons";
 
-// Камеры запоминаются: последняя выбранная и добавленные вручную
+// Последняя выбранная камера запоминается в браузере (сами камеры лежат в базе)
 interface CameraMemory {
   last: string;
-  custom: Camera[];
 }
-const cameraStore = createStore<CameraMemory>("plenka:cameras", "local", () => ({ last: CAMERAS[0].id, custom: [] }));
-const CAMERA_FALLBACK: CameraMemory = { last: CAMERAS[0].id, custom: [] };
+const cameraStore = createStore<CameraMemory>("plenka:cameras", "local", () => ({ last: "" }));
+const CAMERA_FALLBACK: CameraMemory = { last: "" };
+
+/** Плёнка, в которую можно добавить кадры */
+interface UploadRoll {
+  id: number;
+  title: string;
+  year: number;
+  month: number;
+}
+
+/** Что написать, если сервер отказал (коды из app/api/rolls/[id]/frames) */
+const ERRORS: Record<string, string> = {
+  auth: "Войдите заново и повторите",
+  size: "Файл слишком большой",
+  quota: "Не хватает места в вашем архиве",
+  format: "Не удалось прочитать картинку: формат не поддерживается",
+  roll: "Плёнка не найдена",
+  storage: "Сервер не смог сохранить файл",
+  form: "Сервер не принял файл",
+};
 
 type Status = "queued" | "uploading" | "done" | "error";
 interface Item {
@@ -34,11 +42,12 @@ interface Item {
   name: string;
   size: number;
   url: string;
+  file: File;
+  /** Номер кадра в плёнке, резервируется при старте загрузки */
+  idx: number;
   status: Status;
   progress: number;
-  speed: number;
-  /** В прототипе каждый девятый кадр «сбоит» один раз, чтобы показать повторную загрузку */
-  willFail: boolean;
+  error?: string;
 }
 
 const IMAGE = /\.(jpe?g|png|tiff?|webp|heic)$/i;
@@ -46,8 +55,9 @@ const NEW = "__new__";
 const PARALLEL = 3;
 const now = new Date();
 
-export default function UploadPrototype() {
+export default function UploadPrototype({ rolls, cameras: savedCameras, films }: { rolls: UploadRoll[]; cameras: Camera[]; films: Film[] }) {
   const memory = useStore(cameraStore, CAMERA_FALLBACK);
+  const router = useRouter();
 
   const [mode, setMode] = useState<"new" | "existing">("new");
   const [rollId, setRollId] = useState("");
@@ -59,7 +69,8 @@ export default function UploadPrototype() {
   const [year, setYear] = useState(String(now.getFullYear()));
   const [description, setDescription] = useState("");
 
-  const [customFilms, setCustomFilms] = useState<Film[]>([]);
+  const [extraFilms, setExtraFilms] = useState<Film[]>([]);
+  const [extraCameras, setExtraCameras] = useState<Camera[]>([]);
   const [addingFilm, setAddingFilm] = useState(false);
   const [newFilm, setNewFilm] = useState("");
   const [addingCamera, setAddingCamera] = useState(false);
@@ -67,6 +78,10 @@ export default function UploadPrototype() {
 
   const [items, setItems] = useState<Item[]>([]);
   const [started, setStarted] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  /** Куда загрузили: номер плёнки и была ли она создана сейчас (новая плёнка видна только автору) */
+  const [uploaded, setUploaded] = useState<{ rollId: number; created: boolean } | null>(null);
   const [tried, setTried] = useState(false);
   const [hint, setHint] = useState<{ folder: string; found: string[] } | null>(null);
   const [drag, setDrag] = useState(false);
@@ -74,12 +89,15 @@ export default function UploadPrototype() {
   const folderInput = useRef<HTMLInputElement>(null);
   const nextId = useRef(1);
   const urls = useRef<string[]>([]);
+  const session = useRef<number | null>(null);
+  const inflight = useRef(new Set<number>());
 
-  const allFilms = useMemo(() => [...FILMS, ...customFilms], [customFilms]);
-  const cameras = useMemo(() => [...CAMERAS, ...memory.custom], [memory.custom]);
-  const cameraId = cameraPick ?? memory.last;
+  // добавленное только что и пришедшее с сервера после обновления страницы не должно двоиться
+  const allFilms = useMemo(() => [...films, ...extraFilms.filter((f) => !films.some((x) => x.id === f.id))], [films, extraFilms]);
+  const cameras = useMemo(() => [...savedCameras, ...extraCameras.filter((c) => !savedCameras.some((x) => x.id === c.id))], [savedCameras, extraCameras]);
+  const cameraId = cameraPick ?? (cameras.some((c) => c.id === memory.last) ? memory.last : (cameras[0]?.id ?? ""));
   const film = allFilms.find((f) => f.id === filmId);
-  const existing = ROLLS.find((r) => String(r.id) === rollId);
+  const existing = rolls.find((r) => String(r.id) === rollId);
 
   useEffect(() => {
     folderInput.current?.setAttribute("webkitdirectory", "");
@@ -89,48 +107,71 @@ export default function UploadPrototype() {
     return () => list.forEach((u) => URL.revokeObjectURL(u));
   }, []);
 
-  // ── имитация загрузки: параллельно по три кадра, часть сбоит один раз ──
-  const working = items.some((i) => i.status === "queued" || i.status === "uploading");
+  // ── загрузка: параллельно по три кадра, каждый отдельным запросом с прогрессом ──
+  const send = useCallback((item: Item) => {
+    const rollNo = session.current;
+    if (rollNo === null) return;
+    inflight.current.add(item.id);
+    const patch = (p: Partial<Item>) => setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...p } : i)));
+    const finish = (p: Partial<Item>) => {
+      inflight.current.delete(item.id);
+      patch(p);
+    };
+    patch({ status: "uploading", progress: 0, error: undefined });
+
+    const body = new FormData();
+    body.append("file", item.file);
+    body.append("idx", String(item.idx));
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/rolls/${rollNo}/frames`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) patch({ progress: Math.min(99, (e.loaded / e.total) * 100) });
+    };
+    xhr.onload = () => {
+      if (xhr.status === 200) return finish({ status: "done", progress: 100 });
+      let code = "";
+      try {
+        code = JSON.parse(xhr.responseText).error;
+      } catch {
+        // ответ не JSON
+      }
+      finish({ status: "error", progress: 0, error: ERRORS[code] ?? `Ошибка сервера (${xhr.status})` });
+    };
+    xhr.onerror = () => finish({ status: "error", progress: 0, error: "Нет связи с сервером" });
+    xhr.send(body);
+  }, []);
+
   useEffect(() => {
-    if (!started || !working) return;
-    const t = setInterval(() => {
-      setItems((prev) => {
-        let free = PARALLEL - prev.filter((i) => i.status === "uploading").length;
-        return prev.map((i) => {
-          if (i.status === "queued" && free > 0) {
-            free--;
-            return { ...i, status: "uploading" as const };
-          }
-          if (i.status !== "uploading") return i;
-          const p = i.progress + i.speed;
-          if (i.willFail && p >= 55) return { ...i, status: "error" as const, progress: 55 };
-          if (p >= 100) return { ...i, status: "done" as const, progress: 100 };
-          return { ...i, progress: p };
-        });
-      });
-    }, 140);
-    return () => clearInterval(t);
-  }, [started, working]);
+    if (!started) return;
+    let free = PARALLEL - inflight.current.size;
+    for (const i of items) {
+      if (free <= 0) break;
+      if (i.status === "queued" && !inflight.current.has(i.id)) {
+        free--;
+        send(i);
+      }
+    }
+  }, [items, started, send]);
 
   const addFiles = useCallback((files: File[], folder: string | null) => {
     const images = files.filter((f) => f.type.startsWith("image/") || IMAGE.test(f.name)).sort((a, b) => a.name.localeCompare(b.name, "ru", { numeric: true }));
     if (!images.length) return;
     setItems((prev) => [
       ...prev,
-      ...images.map((f, n) => {
+      ...images.map((f) => {
         const url = URL.createObjectURL(f);
         urls.current.push(url);
         const id = nextId.current++;
-        return { id, name: f.name, size: f.size, url, status: "queued" as const, progress: 0, speed: 5 + ((id * 7) % 9), willFail: (prev.length + n) % 9 === 4 };
+        return { id, name: f.name, size: f.size, url, file: f, idx: 0, status: "queued" as const, progress: 0 };
       }),
     ]);
     // только папка даёт подсказку: у отдельных файлов названия плёнки нет
     if (folder && mode === "new") {
-      const g = parseFolderName(folder, [...FILMS, ...customFilms]);
+      const g = parseFolderName(folder, allFilms);
       const found: string[] = [];
       if (g.filmId) {
         setFilmId(g.filmId);
-        found.push(FILMS.find((f) => f.id === g.filmId)?.name ?? "");
+        found.push(allFilms.find((f) => f.id === g.filmId)?.name ?? "");
       }
       if (g.iso) {
         setIso(String(g.iso));
@@ -148,7 +189,7 @@ export default function UploadPrototype() {
     } else if (!folder) {
       setHint(null);
     }
-  }, [mode, customFilms]);
+  }, [mode, allFilms]);
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -174,17 +215,16 @@ export default function UploadPrototype() {
     const f = allFilms.find((x) => x.id === v);
     if (f?.iso) setIso(String(f.iso));
   };
-  const saveFilm = () => {
+  const saveFilm = async () => {
     const name = newFilm.trim();
     if (!name) return;
     const guessIso = Number(name.match(/(\d{2,4})\s*$/)?.[1]);
-    const f: Film = {
-      id: `custom-${customFilms.length + 1}`,
-      name,
-      iso: ISO_VALUES.includes(guessIso) ? guessIso : null,
-      synonyms: [name.toLowerCase().replace(/[^a-z0-9а-яё]/g, "")],
-    };
-    setCustomFilms((p) => [...p, f]);
+    const f = await createFilmAction(name, ISO_VALUES.includes(guessIso) ? guessIso : null);
+    if (!f) {
+      setStartError("Не удалось добавить плёнку");
+      return;
+    }
+    setExtraFilms((p) => [...p, f]);
     setFilmId(f.id);
     if (f.iso) setIso(String(f.iso));
     setNewFilm("");
@@ -198,11 +238,16 @@ export default function UploadPrototype() {
     setCameraPick(v);
     cameraStore.set({ last: v });
   };
-  const saveCamera = () => {
+  const saveCamera = async () => {
     const name = newCamera.trim();
     if (!name) return;
-    const c: Camera = { id: `custom-${memory.custom.length + 1}`, name };
-    cameraStore.set({ custom: [...memory.custom, c], last: c.id });
+    const c = await createCameraAction(name);
+    if (!c) {
+      setStartError("Не удалось добавить камеру");
+      return;
+    }
+    setExtraCameras((p) => [...p, c]);
+    cameraStore.set({ last: c.id });
     setCameraPick(c.id);
     setNewCamera("");
     setAddingCamera(false);
@@ -210,24 +255,58 @@ export default function UploadPrototype() {
 
   // ── проверка и запуск ──
   const isoNum = iso ? Number(iso) : null;
-  const title = mode === "existing" ? (existing ? rollTitle(existing) : "") : film ? makeTitle(film, Number(month), Number(year), isoNum) : "";
+  const title = mode === "existing" ? (existing ? existing.title : "") : film ? makeTitle(film, Number(month), Number(year), isoNum) : "";
   const problems: string[] = [];
   if (mode === "existing" ? !existing : !film) problems.push(mode === "existing" ? "Выберите плёнку" : "Выберите плёнку из списка (можно «Не знаю»)");
-  if (mode === "new" && !cameraId) problems.push("Выберите камеру");
+  if (mode === "new" && !cameraId && !newCamera.trim()) problems.push(cameras.length ? "Выберите камеру" : "Укажите камеру");
   if (!items.length) problems.push("Добавьте кадры");
 
-  const start = () => {
+  const start = async () => {
     setTried(true);
-    if (problems.length) return;
+    if (problems.length || starting) return;
+    setStarting(true);
+    setStartError(null);
+    // камер ещё нет: создаём ту, название которой ввели в поле
+    let useCameraId = cameraId;
+    if (mode === "new" && !useCameraId) {
+      const c = await createCameraAction(newCamera.trim());
+      if (!c) {
+        setStarting(false);
+        setStartError("Не удалось сохранить камеру");
+        return;
+      }
+      setExtraCameras((p) => [...p, c]);
+      cameraStore.set({ last: c.id });
+      setCameraPick(c.id);
+      setNewCamera("");
+      useCameraId = c.id;
+    }
+    const res = await startUploadAction({
+      rollId: mode === "existing" ? Number(rollId) : null,
+      roll: mode === "new" ? { filmId, format, iso: isoNum, cameraId: useCameraId, month: Number(month), year: Number(year), description } : null,
+      count: items.length,
+      totalBytes: items.reduce((sum, i) => sum + i.size, 0),
+    });
+    setStarting(false);
+    if (!res.ok) {
+      setStartError(res.error);
+      return;
+    }
+    session.current = res.rollId;
+    setUploaded({ rollId: res.rollId, created: mode === "new" });
+    setItems((p) => p.map((i, n) => ({ ...i, idx: res.firstIdx + n })));
     setStarted(true);
   };
-  const retry = (id: number) => setItems((p) => p.map((i) => (i.id === id ? { ...i, status: "queued", progress: 0, willFail: false } : i)));
-  const retryAll = () => setItems((p) => p.map((i) => (i.status === "error" ? { ...i, status: "queued", progress: 0, willFail: false } : i)));
+  const retry = (id: number) => setItems((p) => p.map((i) => (i.id === id ? { ...i, status: "queued", progress: 0, error: undefined } : i)));
+  const retryAll = () => setItems((p) => p.map((i) => (i.status === "error" ? { ...i, status: "queued", progress: 0, error: undefined } : i)));
   const reset = () => {
     urls.current.forEach((u) => URL.revokeObjectURL(u));
     urls.current = [];
+    session.current = null;
     setItems([]);
     setStarted(false);
+    setUploaded(null);
+    setStartError(null);
     setTried(false);
     setHint(null);
   };
@@ -238,6 +317,12 @@ export default function UploadPrototype() {
   const overall = total ? items.reduce((s, i) => s + i.progress, 0) / total : 0;
   const finished = started && total > 0 && done === total;
   const locked = started && !finished;
+  const errors = [...new Set(items.filter((i) => i.status === "error" && i.error).map((i) => i.error!))];
+
+  // после загрузки обновляем списки (новая плёнка попадёт в «Добавить в существующую», в шапку и ленту)
+  useEffect(() => {
+    if (finished) router.refresh();
+  }, [finished, router]);
 
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-12">
@@ -267,15 +352,16 @@ export default function UploadPrototype() {
 
         <p className="text-[11px] uppercase tracking-[0.12em] text-ink-faint">Название папки</p>
         <p className={`mt-1 min-h-[3.4rem] text-[20px] leading-snug ${title ? "" : "text-ink-faint/60"}`}>{title || "выберите плёнку"}</p>
+        {mode === "new" && <p className="mt-1 text-xs text-ink-faint">Доступ: только вы. Изменить можно в настройках папки.</p>}
 
         {mode === "existing" ? (
           <div className="mt-6 space-y-4">
             <Field label="Плёнка" error={tried && !existing}>
               <select className={control} value={rollId} onChange={(e) => setRollId(e.target.value)}>
                 <option value="">Выберите плёнку…</option>
-                {[...ROLLS].sort((a, b) => b.year * 12 + b.month - (a.year * 12 + a.month)).map((r) => (
+                {[...rolls].sort((a, b) => b.year * 12 + b.month - (a.year * 12 + a.month)).map((r) => (
                   <option key={r.id} value={r.id}>
-                    {rollTitle(r)}
+                    {r.title}
                   </option>
                 ))}
               </select>
@@ -324,7 +410,20 @@ export default function UploadPrototype() {
               </Field>
             </div>
 
-            <Field label="Камера" error={tried && !cameraId}>
+            <Field label="Камера" error={tried && !cameraId && !newCamera.trim()}>
+              {cameras.length === 0 ? (
+                <>
+                  <input
+                    className={control}
+                    value={newCamera}
+                    onChange={(e) => setNewCamera(e.target.value)}
+                    placeholder="Название камеры, например Pentax 155g"
+                    autoComplete="off"
+                  />
+                  <p className="mt-1 text-xs text-ink-faint">Камеры у вас ещё нет: она сохранится вместе с плёнкой и появится в списке</p>
+                </>
+              ) : (
+              <>
               <select className={control} value={cameraId} onChange={(e) => pickCamera(e.target.value)}>
                 {cameras.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -337,6 +436,8 @@ export default function UploadPrototype() {
                 <Inline value={newCamera} onChange={setNewCamera} onSave={saveCamera} onCancel={() => setAddingCamera(false)} placeholder="Название камеры" />
               ) : (
                 <p className="mt-1 text-xs text-ink-faint">Последняя выбранная запоминается</p>
+              )}
+              </>
               )}
             </Field>
 
@@ -410,6 +511,7 @@ export default function UploadPrototype() {
                 {started ? `Загружено ${done} из ${total}` : `Кадров: ${total}`}
                 {failed > 0 && <span className="text-accent"> · не удалось: {failed}</span>}
               </p>
+              {errors.length > 0 && <p className="basis-full text-sm text-accent">{errors.join("; ")}</p>}
               {started && (
                 <div className="h-1.5 min-w-32 flex-1 overflow-hidden rounded-full bg-paper-edge" role="progressbar" aria-valuenow={Math.round(overall)} aria-valuemin={0} aria-valuemax={100}>
                   <div className="h-full bg-ink transition-[width] duration-150" style={{ width: `${overall}%` }} />
@@ -424,7 +526,7 @@ export default function UploadPrototype() {
 
             <ul className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-2">
               {items.map((i) => (
-                <li key={i.id} className="relative aspect-square overflow-hidden rounded-frame bg-paper-deep ring-1 ring-line" title={`${i.name} · ${(i.size / 1048576).toFixed(1)} МБ`}>
+                <li key={i.id} className="relative aspect-square overflow-hidden rounded-frame bg-paper-deep ring-1 ring-line" title={`${i.name} · ${(i.size / 1048576).toFixed(1)} МБ${i.error ? ` · ${i.error}` : ""}`}>
                   <Image src={i.url} alt="" fill unoptimized sizes="120px" className={`object-cover transition-opacity ${i.status === "done" || !started ? "opacity-100" : "opacity-60"}`} />
                   {started && i.status !== "done" && (
                     <div className="absolute inset-x-0 bottom-0 h-1 bg-black/15">
@@ -455,8 +557,13 @@ export default function UploadPrototype() {
             <div className="flex flex-wrap items-center gap-3 rounded-[3px] bg-paper-deep px-4 py-3" role="status">
               <CheckIcon className="text-ink" />
               <span className="text-sm">
-                Готово: {total} кадров в «{title}». В прототипе ничего не сохраняется.
+                Готово: {total} кадров в «{title}».{uploaded?.created && " Плёнка видна только вам: доступ меняется в настройках папки."}
               </span>
+              {uploaded && (
+                <Link href={`/rolls/${uploaded.rollId}`} className="text-sm text-accent underline underline-offset-4">
+                  Открыть папку
+                </Link>
+              )}
               <Link href="/" className="text-sm text-accent underline underline-offset-4">
                 К ленте
               </Link>
@@ -466,8 +573,8 @@ export default function UploadPrototype() {
             </div>
           ) : (
             <>
-              <button type="button" onClick={start} disabled={locked} className="rounded-control bg-ink px-6 py-2.5 text-sm text-paper transition-opacity hover:opacity-85 disabled:opacity-40">
-                {locked ? "Загружается…" : items.length ? `Загрузить ${items.length} ${items.length === 1 ? "кадр" : "кадров"}` : "Загрузить"}
+              <button type="button" onClick={start} disabled={locked || starting} className="rounded-control bg-ink px-6 py-2.5 text-sm text-paper transition-opacity hover:opacity-85 disabled:opacity-40">
+                {locked || starting ? "Загружается…" : items.length ? `Загрузить ${items.length} ${items.length === 1 ? "кадр" : "кадров"}` : "Загрузить"}
               </button>
               {items.length > 0 && !locked && (
                 <button type="button" onClick={reset} className="text-sm text-ink-soft underline underline-offset-4 hover:text-ink">
@@ -477,6 +584,11 @@ export default function UploadPrototype() {
             </>
           )}
         </div>
+        {startError && (
+          <p className="mt-3 text-sm text-accent" role="alert">
+            {startError}
+          </p>
+        )}
         {tried && problems.length > 0 && !started && (
           <ul className="mt-3 space-y-0.5 text-sm text-accent" role="alert">
             {problems.map((p) => (
