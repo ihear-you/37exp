@@ -38,8 +38,7 @@ async function searchQuery(query: string, key: string, perPage: number): Promise
   return data.results;
 }
 
-/** Пусто, если ключа нет или Unsplash недоступен — вызывающий код подставит локальные кадры */
-export async function getEditorialPhotos(perQuery = 30): Promise<EditorialPhoto[]> {
+async function loadEditorialPhotos(perQuery: number): Promise<EditorialPhoto[]> {
   const key = process.env.UNSPLASH_ACCESS_KEY;
   if (!key) return [];
 
@@ -69,4 +68,26 @@ export async function getEditorialPhotos(perQuery = 30): Promise<EditorialPhoto[
   } catch {
     return [];
   }
+}
+
+// Результат держим в памяти процесса: без этого каждый заход на главную заново слал бы в Unsplash
+// запрос «засчитать показ» на каждое из 30 фото (медленно и быстро съедает лимит 50 запросов в час).
+const OK_TTL = 24 * 60 * 60 * 1000;
+const FAIL_TTL = 5 * 60 * 1000; // пусто (ошибка или лимит): пробуем снова не чаще раза в 5 минут
+let cached: { at: number; ttl: number; perQuery: number; photos: EditorialPhoto[] } | null = null;
+let inflight: Promise<EditorialPhoto[]> | null = null;
+
+/** Пусто, если ключа нет или Unsplash недоступен — вызывающий код подставит запасной вариант */
+export async function getEditorialPhotos(perQuery = 30): Promise<EditorialPhoto[]> {
+  if (!process.env.UNSPLASH_ACCESS_KEY) return [];
+  if (cached && cached.perQuery === perQuery && Date.now() - cached.at < cached.ttl) return cached.photos;
+  inflight ??= loadEditorialPhotos(perQuery)
+    .then((photos) => {
+      cached = { at: Date.now(), ttl: photos.length ? OK_TTL : FAIL_TTL, perQuery, photos };
+      return photos;
+    })
+    .finally(() => {
+      inflight = null;
+    });
+  return inflight;
 }
