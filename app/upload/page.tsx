@@ -21,13 +21,7 @@ export default async function UploadPage() {
       <div className="mb-4">
         <BackButton />
       </div>
-      <h1 className="text-[26px] leading-tight md:text-[36px]">Загрузка плёнки</h1>
-      <p className="mt-3 max-w-2xl text-ink-soft">
-        Кадры загружаются на сервер по одному. Новая плёнка сначала видна только вам, это можно изменить в настройках папки.
-      </p>
-      <div className="mt-8 md:mt-10">
-        <UploadPrototype rolls={rolls.map((r) => ({ id: r.id, title: r.title, year: r.year, month: r.month }))} cameras={cameras} films={films} />
-      </div>
+      <UploadPrototype rolls={rolls.map((r) => ({ id: r.id, title: r.title, year: r.year, month: r.month }))} cameras={cameras} films={films} />
     </div>
   );
 }
