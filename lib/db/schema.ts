@@ -112,6 +112,54 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
     PRIMARY KEY (user_id, id)
   );
   `,
+  /* 6: импорт кадров по ссылке (Яндекс Диск): задание и его файлы */ `
+  CREATE TABLE imports (
+    id         TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    roll_id    INTEGER NOT NULL REFERENCES rolls(id) ON DELETE CASCADE,
+    source     TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX imports_user ON imports(user_id);
+
+  -- задание закончено, когда не осталось файлов в состояниях queued и working
+  CREATE TABLE import_items (
+    import_id TEXT NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+    pos       INTEGER NOT NULL,
+    name      TEXT NOT NULL,
+    path      TEXT NOT NULL,
+    size      INTEGER NOT NULL,
+    -- номер кадра в плёнке, зарезервирован при старте
+    idx       INTEGER NOT NULL,
+    status    TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'working', 'done', 'error')),
+    error     TEXT,
+    PRIMARY KEY (import_id, pos)
+  );
+  `,
+  /* 7: импорт в два шага: сначала быстрые уменьшенные копии, потом оригиналы */ `
+  -- кадр показан по временной копии (уменьшенной, от источника), оригинал ещё не принят
+  ALTER TABLE frames ADD COLUMN provisional INTEGER NOT NULL DEFAULT 0;
+
+  -- состояние файла теперь знает шаг «показан по копии» (preview); задания короткие, старые не нужны
+  DROP TABLE import_items;
+  DELETE FROM imports;
+  CREATE TABLE import_items (
+    import_id TEXT NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+    pos       INTEGER NOT NULL,
+    name      TEXT NOT NULL,
+    path      TEXT NOT NULL,
+    size      INTEGER NOT NULL,
+    idx       INTEGER NOT NULL,
+    -- queued: ещё ничего; preview: кадр уже в плёнке по уменьшенной копии; working: качается оригинал
+    status    TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'preview', 'working', 'done', 'error')),
+    error     TEXT,
+    -- адрес уменьшенной копии у источника и кадр, который по ней создан
+    preview   TEXT,
+    frame_id  TEXT,
+    PRIMARY KEY (import_id, pos)
+  );
+  `,
 ];
 
 export function migrate(db: Database.Database) {

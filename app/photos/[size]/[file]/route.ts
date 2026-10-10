@@ -23,8 +23,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ siz
   return new Response(new Uint8Array(data), {
     headers: {
       "Content-Type": "image/jpeg",
-      // содержимое кадра не меняется; закрытые плёнки не должны оседать в общих кэшах
-      "Cache-Control": `${access.visibility === "public" ? "public" : "private"}, max-age=3600`,
+      // содержимое кадра не меняется; закрытые плёнки не должны оседать в общих кэшах.
+      // Временная копия (импорт, до прихода оригинала) скоро заменится: её не кэшируем
+      "Cache-Control": access.provisional ? "private, no-store" : `${access.visibility === "public" ? "public" : "private"}, max-age=3600`,
       "X-Content-Type-Options": "nosniff",
     },
   });

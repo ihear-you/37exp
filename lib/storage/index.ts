@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 // Хранилище файлов кадров на диске сервера. Файлы лежат вне public/ и отдаются только через
@@ -34,17 +34,45 @@ export interface PhotoFiles {
   full: Buffer;
 }
 
-/** Кладёт все три файла кадра. Если что-то не записалось, убирает уже записанное и кидает ошибку. */
-export async function savePhoto(userId: number, id: string, files: PhotoFiles): Promise<void> {
+/**
+ * Кладёт все три файла кадра. Если что-то не записалось, убирает уже записанное и кидает ошибку.
+ * keepOnFailure: при замене временных копий на настоящие (импорт, шаг 2) прежние файлы кадра
+ * стирать нельзя, иначе уже показанный кадр останется без картинки.
+ */
+export async function savePhoto(userId: number, id: string, files: PhotoFiles, options: { keepOnFailure?: boolean } = {}): Promise<void> {
   if (!SAFE_ID.test(id) || !SAFE_EXT.test(files.original.ext)) throw new Error("bad photo id");
   try {
     await writeAtomic(path.join(ROOT, "originals", String(userId), `${id}.${files.original.ext}`), files.original.data);
     await writeAtomic(renditionPath("full", id), files.full);
     await writeAtomic(renditionPath("feed", id), files.feed);
   } catch (e) {
-    await deletePhoto(userId, id, files.original.ext);
+    if (!options.keepOnFailure) await deletePhoto(userId, id, files.original.ext);
     throw e;
   }
+}
+
+/** Копии кадра без оригинала: временный кадр по уменьшенной копии от источника (оригинал придёт позже) */
+export async function saveRenditions(id: string, files: { feed: Buffer; full: Buffer }): Promise<void> {
+  if (!SAFE_ID.test(id)) throw new Error("bad photo id");
+  await writeAtomic(renditionPath("full", id), files.full);
+  await writeAtomic(renditionPath("feed", id), files.feed);
+}
+
+export async function deleteRenditions(id: string): Promise<void> {
+  if (!SAFE_ID.test(id)) return;
+  await Promise.all([rm(renditionPath("full", id), { force: true }), rm(renditionPath("feed", id), { force: true })]);
+}
+
+/** Стирает все файлы кадров (удаление плёнки): копии и оригиналы с любым расширением. Кадры стартового набора не трогает */
+export async function deletePhotos(userId: number, ids: readonly string[]): Promise<void> {
+  const wanted = new Set(ids.filter((id) => SAFE_ID.test(id)));
+  if (wanted.size === 0) return;
+  const originals = path.join(ROOT, "originals", String(userId));
+  const names = await readdir(originals).catch(() => [] as string[]);
+  await Promise.all([
+    ...names.filter((n) => wanted.has(n.split(".")[0])).map((n) => rm(path.join(originals, n), { force: true })),
+    ...[...wanted].flatMap((id) => [rm(renditionPath("full", id), { force: true }), rm(renditionPath("feed", id), { force: true })]),
+  ]);
 }
 
 /** Уборка файлов кадра (ошибка записи в базу после записи файлов) */

@@ -23,15 +23,19 @@ export interface Processed {
 /** Кидает ошибку, если файл не картинка или не читается */
 export async function processPhoto(input: Buffer): Promise<Processed> {
   // поворот по EXIF применяем один раз, дальше работаем с уже «прямой» картинкой
+  // Поворот по EXIF и уменьшение идут одной цепочкой для каждой копии: так оригинал не пересохраняется
+  // целиком в промежуточный файл (на сервере это заметная доля времени), а результат тот же.
   const source = sharp(input, { limitInputPixels: MAX_PIXELS });
   const format = (await source.metadata()).format ?? "";
-  const upright = await source.rotate().toBuffer();
+  const upright = source.rotate();
 
-  const full = await sharp(upright)
+  const full = await upright
+    .clone()
     .resize({ width: LONG_FULL, height: LONG_FULL, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 80, mozjpeg: true })
     .toBuffer();
-  const feed = await sharp(upright)
+  const feed = await upright
+    .clone()
     .resize({ width: LONG_FEED, height: LONG_FEED, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 78, mozjpeg: true })
     .toBuffer();
@@ -39,6 +43,14 @@ export async function processPhoto(input: Buffer): Promise<Processed> {
   const { width, height } = await sharp(feed).metadata();
   const raw = await sharp(feed).resize(24, 24, { fit: "fill" }).removeAlpha().raw().toBuffer();
   return { format, feed, full, w: width, h: height, ...analyze(raw) };
+}
+
+/** Размер, цвет и яркость готовой картинки без пересжатия (для временной копии от источника). Кидает ошибку, если это не картинка */
+export async function describePhoto(input: Buffer): Promise<Omit<Processed, "feed" | "full">> {
+  const image = sharp(input, { limitInputPixels: MAX_PIXELS }).rotate();
+  const { data, info } = await image.clone().toBuffer({ resolveWithObject: true });
+  const raw = await sharp(data).resize(24, 24, { fit: "fill" }).removeAlpha().raw().toBuffer();
+  return { format: info.format, w: info.width, h: info.height, ...analyze(raw) };
 }
 
 /** Цвет и яркость по уменьшенной картинке 24×24 */

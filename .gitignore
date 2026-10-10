@@ -52,6 +52,8 @@ next-env.d.ts
 # локальная база (lib/db)
 /data/*.db
 /data/*.db-*
+# кэш фото Unsplash (lib/unsplash.ts)
+/data/unsplash-cache.json
 
 !.env.example
 

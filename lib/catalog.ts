@@ -22,10 +22,11 @@ export interface Film {
 /** Кто видит плёнку: только автор, любой по ссылке со своим ключом, или все (в том числе в списке на странице автора) */
 export type Visibility = "private" | "link" | "public";
 
-export const VISIBILITIES: { id: Visibility; label: string }[] = [
-  { id: "private", label: "Только я" },
-  { id: "link", label: "Все, у кого есть ссылка" },
-  { id: "public", label: "Все (видна на моей странице)" },
+/** short: подпись на кнопке доступа; label и hint: в списке выбора */
+export const VISIBILITIES: { id: Visibility; short: string; label: string; hint: string }[] = [
+  { id: "private", short: "Только я", label: "Только я", hint: "Плёнку видите только вы" },
+  { id: "link", short: "По ссылке", label: "Все, у кого есть ссылка", hint: "В списках не видна, открывается только по ссылке" },
+  { id: "public", short: "Видна всем", label: "Все", hint: "Плёнка есть на вашей странице, её может открыть любой" },
 ];
 
 export interface Camera {
@@ -53,7 +54,6 @@ export interface Roll {
 
 /** Правка плёнки из формы «Изменить» */
 export interface RollEdit {
-  visibility: Visibility;
   title: string | null;
   description: string;
   filmId: string;

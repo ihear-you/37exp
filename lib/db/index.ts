@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { canView } from "../access";
-import { FILMS, rollView, type Camera, type Film, type Frame, type Roll, type RollEdit, type RollView } from "../catalog";
+import { FILMS, rollView, type Camera, type Film, type Frame, type Roll, type RollEdit, type RollView, type Visibility } from "../catalog";
+import { deletePhotos } from "../storage";
 import * as q from "./queries";
 import { DEFAULT_USER_ID } from "./user";
 
@@ -138,6 +139,25 @@ export async function updateRoll(userId: number, id: number, edit: RollEdit): Pr
   return q.saveRoll(userId, id, edit);
 }
 
+/** Кто видит плёнку. false, если такой плёнки нет */
+export async function setRollVisibility(userId: number, id: number, visibility: Visibility): Promise<boolean> {
+  await connection();
+  return q.setRollVisibility(userId, id, visibility);
+}
+
+/**
+ * Удаляет плёнку целиком: её кадры, задания импорта и файлы (оригиналы и копии), место в лимите освобождается.
+ * Это необратимо. false, если такой плёнки нет.
+ */
+export async function deleteRoll(userId: number, id: number): Promise<boolean> {
+  await connection();
+  const frames = q.deleteRoll(userId, id);
+  if (frames === null) return false;
+  // строки уже удалены: если файл не сотрётся, он просто останется лежать, на сайте его не будет
+  await deletePhotos(userId, frames).catch(() => {});
+  return true;
+}
+
 /** false, если такого кадра нет */
 export async function deleteFrame(userId: number, frameId: string): Promise<boolean> {
   await connection();
@@ -185,6 +205,48 @@ export async function getRollByShareKey(key: string) {
   await connection();
   return q.findRollIdByShareKey(key);
 }
+
+// ── импорт по ссылке ──
+
+export type { ImportItem, ImportItemStatus, ImportJob } from "./queries";
+
+export async function createImport(
+  userId: number,
+  rollId: number,
+  source: string,
+  sourceUrl: string,
+  items: { name: string; path: string; size: number; idx: number; preview: string | null }[],
+): Promise<string> {
+  await connection();
+  return q.insertImport(userId, rollId, source, sourceUrl, items);
+}
+
+/** Задание пользователя с файлами; null, если его нет или оно чужое */
+export async function getImport(userId: number, id: string): Promise<q.ImportJob | null> {
+  await connection();
+  return q.findImport(id, userId);
+}
+
+/** Возвращает сбойные файлы в очередь; сколько вернулось (0, если задания нет или оно чужое) */
+export async function retryImport(userId: number, id: string): Promise<number> {
+  await connection();
+  return q.findImport(id, userId) ? q.requeueImportItems(id, ["error"]) : 0;
+}
+
+/**
+ * Для фоновых задач (импорт по ссылке). Они продолжают работать после ответа сервера, вне запроса,
+ * поэтому здесь нет connection(): только запросы к базе. Права проверяет тот, кто запускает задачу.
+ */
+export const background = {
+  usedBytes: q.userStorageBytes,
+  addFrame: q.insertFrame,
+  finalizeFrame: q.finalizeFrame,
+  removeProvisionalFrame: q.removeProvisionalFrame,
+  findImport: (id: string) => q.findImport(id, null),
+  takeImportItem: q.takeImportItem,
+  setImportItem: q.setImportItem,
+  requeueImportItems: q.requeueImportItems,
+};
 
 // ── пользователи и сессии (используются из lib/auth) ──
 

@@ -18,6 +18,9 @@ import { createStore, useStore } from "@/lib/persist";
 import {
   createCameraAction,
   createFilmAction,
+  previewImportAction,
+  retryImportAction,
+  startImportAction,
   startUploadAction,
 } from "../upload/actions";
 import { control, Select } from "./fields";
@@ -49,6 +52,7 @@ const ERRORS: Record<string, string> = {
   roll: "Плёнка не найдена",
   storage: "Сервер не смог сохранить файл",
   form: "Сервер не принял файл",
+  download: "Не удалось скачать файл с Яндекс Диска",
 };
 
 type Status = "queued" | "uploading" | "done" | "error";
@@ -56,13 +60,17 @@ interface Item {
   id: number;
   name: string;
   size: number;
-  url: string;
-  file: File;
+  /** Превью: у кадров с компьютера сам файл, у кадров по ссылке миниатюра с Диска (её может не быть).
+   *  Файл есть только у кадров с компьютера: по ссылке их скачивает сервер */
+  url?: string;
+  file?: File;
   /** Номер кадра в плёнке, резервируется при старте загрузки */
   idx: number;
   status: Status;
   progress: number;
   error?: string;
+  /** Импорт по ссылке: кадр уже виден в плёнке (по уменьшенной копии), оригинал ещё докачивается */
+  shown?: boolean;
 }
 
 const IMAGE = /\.(jpe?g|png|tiff?|webp|heic)$/i;
@@ -113,6 +121,21 @@ export default function UploadPrototype({
     null,
   );
   const [drag, setDrag] = useState(false);
+
+  // ── источник «по ссылке с Яндекс Диска» ──
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  /** Кадры взяты по ссылке: сервер сам скачает их с Диска (items тогда без файлов) */
+  const [link, setLink] = useState<{
+    url: string;
+    name: string;
+    skipped: number;
+    tooBig: number;
+  } | null>(null);
+  const [importId, setImportId] = useState<string | null>(null);
+  const [pollKick, setPollKick] = useState(0);
 
   const folderInput = useRef<HTMLInputElement>(null);
   const nextId = useRef(1);
@@ -165,7 +188,7 @@ export default function UploadPrototype({
     patch({ status: "uploading", progress: 0, error: undefined });
 
     const body = new FormData();
-    body.append("file", item.file);
+    body.append("file", item.file!);
     body.append("idx", String(item.idx));
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/rolls/${rollNo}/frames`);
@@ -193,7 +216,7 @@ export default function UploadPrototype({
   }, []);
 
   useEffect(() => {
-    if (!started) return;
+    if (!started || link) return;
     let free = PARALLEL - inflight.current.size;
     for (const i of items) {
       if (free <= 0) break;
@@ -202,7 +225,33 @@ export default function UploadPrototype({
         send(i);
       }
     }
-  }, [items, started, send]);
+  }, [items, started, send, link]);
+
+  // подсказка по названию папки: и для папки с компьютера, и для папки на Диске
+  const applyFolderHint = useCallback(
+    (folder: string) => {
+      const g = parseFolderName(folder, allFilms);
+      const found: string[] = [];
+      if (g.filmId) {
+        setFilmId(g.filmId);
+        found.push(allFilms.find((f) => f.id === g.filmId)?.name ?? "");
+      }
+      if (g.iso) {
+        setIso(String(g.iso));
+        found.push(`ISO ${g.iso}`);
+      }
+      if (g.month) {
+        setMonth(String(g.month));
+        found.push(MONTHS[g.month - 1]);
+      }
+      if (g.year) {
+        setYear(String(g.year));
+        found.push(String(g.year));
+      }
+      setHint({ folder, found });
+    },
+    [allFilms],
+  );
 
   const addFiles = useCallback(
     (files: File[], folder: string | null) => {
@@ -210,8 +259,10 @@ export default function UploadPrototype({
         .filter((f) => f.type.startsWith("image/") || IMAGE.test(f.name))
         .sort((a, b) => a.name.localeCompare(b.name, "ru", { numeric: true }));
       if (!images.length) return;
+      // источники не смешиваются: кадры с компьютера заменяют найденные по ссылке
+      setLink(null);
       setItems((prev) => [
-        ...prev,
+        ...prev.filter((i) => i.file),
         ...images.map((f) => {
           const url = URL.createObjectURL(f);
           urls.current.push(url);
@@ -229,32 +280,101 @@ export default function UploadPrototype({
         }),
       ]);
       // только папка даёт подсказку: у отдельных файлов названия плёнки нет
-      if (folder && mode === "new") {
-        const g = parseFolderName(folder, allFilms);
-        const found: string[] = [];
-        if (g.filmId) {
-          setFilmId(g.filmId);
-          found.push(allFilms.find((f) => f.id === g.filmId)?.name ?? "");
-        }
-        if (g.iso) {
-          setIso(String(g.iso));
-          found.push(`ISO ${g.iso}`);
-        }
-        if (g.month) {
-          setMonth(String(g.month));
-          found.push(MONTHS[g.month - 1]);
-        }
-        if (g.year) {
-          setYear(String(g.year));
-          found.push(String(g.year));
-        }
-        setHint({ folder, found });
-      } else if (!folder) {
-        setHint(null);
-      }
+      if (folder && mode === "new") applyFolderHint(folder);
+      else if (!folder) setHint(null);
     },
-    [mode, allFilms],
+    [mode, applyFolderHint],
   );
+
+  // кадры по ссылке: сервер смотрит, что лежит на Диске; сами файлы скачает он же после «Загрузить»
+  const findByLink = async () => {
+    const url = linkUrl.trim();
+    if (!url || linkBusy) return;
+    setLinkBusy(true);
+    setLinkError(null);
+    const res = await previewImportAction(url);
+    setLinkBusy(false);
+    if (!res.ok) {
+      setLinkError(res.error);
+      return;
+    }
+    urls.current.forEach((u) => URL.revokeObjectURL(u));
+    urls.current = [];
+    setItems(
+      res.files.map((f, n) => ({
+        id: -(n + 1),
+        name: f.name,
+        size: f.size,
+        url: f.preview ?? undefined,
+        idx: 0,
+        status: "queued" as const,
+        progress: 0,
+      })),
+    );
+    setLink({ url, name: res.name, skipped: res.skipped, tooBig: res.tooBig });
+    if (mode === "new") applyFolderHint(res.name);
+    else setHint(null);
+  };
+
+  // ход импорта по ссылке: сервер качает сам, форма только спрашивает состояние
+  useEffect(() => {
+    if (!importId || !started) return;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/imports/${importId}`, { cache: "no-store" });
+        if (!r.ok || stopped) return;
+        const data = (await r.json()) as {
+          finished: boolean;
+          items: {
+            name: string;
+            size: number;
+            status: "queued" | "preview" | "working" | "done" | "error";
+            error: string | null;
+            shown: boolean;
+          }[];
+        };
+        if (stopped) return;
+        // миниатюры пришли при поиске по ссылке: сохраняем их за теми же файлами
+        setItems((prev) =>
+          data.items.map((i, n) => ({
+            id: -(n + 1),
+            name: i.name,
+            size: i.size,
+            url: prev[n]?.name === i.name ? prev[n].url : undefined,
+            idx: 0,
+            // preview: кадр уже в плёнке, ждёт оригинал; working: оригинал качается
+            status:
+              i.status === "working" || i.status === "preview"
+                ? ("uploading" as const)
+                : i.status,
+            progress:
+              i.status === "done"
+                ? 100
+                : i.status === "working"
+                  ? 75
+                  : i.status === "preview"
+                    ? 50
+                    : 0,
+            shown: i.shown,
+            error: i.error ? (ERRORS[i.error] ?? "Не удалось загрузить") : undefined,
+          })),
+        );
+        if (data.finished) {
+          stopped = true;
+          clearInterval(timer);
+        }
+      } catch {
+        // нет связи: попробуем на следующем шаге
+      }
+    };
+    const timer = setInterval(tick, 1500);
+    void tick();
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [importId, started, pollKick]);
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -367,7 +487,7 @@ export default function UploadPrototype({
       setNewCamera("");
       useCameraId = c.id;
     }
-    const res = await startUploadAction({
+    const target = {
       rollId: mode === "existing" ? Number(rollId) : null,
       roll:
         mode === "new"
@@ -381,6 +501,21 @@ export default function UploadPrototype({
               description,
             }
           : null,
+    };
+    if (link) {
+      const res = await startImportAction({ url: link.url, ...target });
+      setStarting(false);
+      if (!res.ok) {
+        setStartError(res.error);
+        return;
+      }
+      setUploaded({ rollId: res.rollId, created: mode === "new" });
+      setImportId(res.importId);
+      setStarted(true);
+      return;
+    }
+    const res = await startUploadAction({
+      ...target,
       count: items.length,
       totalBytes: items.reduce((sum, i) => sum + i.size, 0),
     });
@@ -394,26 +529,33 @@ export default function UploadPrototype({
     setItems((p) => p.map((i, n) => ({ ...i, idx: res.firstIdx + n })));
     setStarted(true);
   };
+  const requeue = (match: (i: Item) => boolean) =>
+    setItems((p) =>
+      p.map((i) =>
+        match(i)
+          ? { ...i, status: "queued", progress: 0, error: undefined }
+          : i,
+      ),
+    );
+  // у импорта по ссылке повторяет сервер, и сразу все сбойные файлы
+  const retryImport = async () => {
+    if (!importId) return;
+    requeue((i) => i.status === "error");
+    await retryImportAction(importId);
+    setPollKick((k) => k + 1);
+  };
   const retry = (id: number) =>
-    setItems((p) =>
-      p.map((i) =>
-        i.id === id
-          ? { ...i, status: "queued", progress: 0, error: undefined }
-          : i,
-      ),
-    );
+    importId ? void retryImport() : requeue((i) => i.id === id);
   const retryAll = () =>
-    setItems((p) =>
-      p.map((i) =>
-        i.status === "error"
-          ? { ...i, status: "queued", progress: 0, error: undefined }
-          : i,
-      ),
-    );
+    importId ? void retryImport() : requeue((i) => i.status === "error");
   const reset = () => {
     urls.current.forEach((u) => URL.revokeObjectURL(u));
     urls.current = [];
     session.current = null;
+    setLink(null);
+    setImportId(null);
+    setLinkError(null);
+    setLinkUrl("");
     setItems([]);
     setStarted(false);
     setUploaded(null);
@@ -423,6 +565,7 @@ export default function UploadPrototype({
   };
 
   const done = items.filter((i) => i.status === "done").length;
+  const shown = items.filter((i) => i.shown || i.status === "done").length;
   const failed = items.filter((i) => i.status === "error").length;
   const total = items.length;
   const overall = total ? items.reduce((s, i) => s + i.progress, 0) / total : 0;
@@ -783,8 +926,84 @@ export default function UploadPrototype({
                 tabIndex={-1}
                 onChange={(e) => onPick(e, true)}
               />
+              <button
+                type="button"
+                aria-expanded={linkOpen}
+                onClick={() => setLinkOpen((v) => !v)}
+                className={ghost}
+              >
+                По ссылке с Яндекс Диска
+              </button>
             </div>
+
+            {linkOpen && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void findByLink();
+                }}
+                className="mt-4 flex w-full max-w-xl flex-wrap justify-center gap-2 text-left"
+              >
+                <input
+                  className={`${control} min-w-0 flex-1 basis-64`}
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  placeholder="https://disk.yandex.ru/d/…"
+                  inputMode="url"
+                  autoComplete="off"
+                  aria-label="Публичная ссылка на Яндекс Диск"
+                />
+                <button
+                  type="submit"
+                  disabled={linkBusy || !linkUrl.trim()}
+                  className={`${ghost} disabled:opacity-40`}
+                >
+                  {linkBusy ? "Ищем…" : "Найти кадры"}
+                </button>
+                <p className="basis-full text-center text-xs text-ink-faint">
+                  Публичная ссылка на папку или файл. Кадры скачает сам сервер,
+                  вкладку можно будет закрыть.
+                </p>
+                {linkError && (
+                  <p
+                    className="basis-full text-center text-sm text-accent"
+                    role="alert"
+                  >
+                    {linkError}
+                  </p>
+                )}
+              </form>
+            )}
           </div>
+
+          {link && (
+            <p
+              className="mt-3 rounded-[3px] bg-paper-deep px-3 py-2 text-sm text-ink-soft"
+              role="status"
+            >
+              Яндекс Диск, «{link.name}»: кадров {items.length}
+              {link.skipped > 0 && `, пропущено не картинок: ${link.skipped}`}
+              {link.tooBig > 0 && `, слишком больших: ${link.tooBig}`}.
+              {importId &&
+                items.some(
+                  (i) => i.status === "queued" || i.status === "uploading",
+                ) &&
+                (shown > 0
+                  ? " Кадры уже в папке, оригиналы докачиваются. Вкладку можно закрыть."
+                  : " Кадры скачивает сервер: вкладку можно закрыть, импорт продолжится.")}
+              {importId && uploaded && !finished && (
+                <>
+                  {" "}
+                  <Link
+                    href={`/rolls/${uploaded.rollId}`}
+                    className="text-accent underline underline-offset-4"
+                  >
+                    Открыть папку
+                  </Link>
+                </>
+              )}
+            </p>
+          )}
 
           {hint && (
             <p
@@ -807,9 +1026,11 @@ export default function UploadPrototype({
             <>
               <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
                 <p className="text-sm text-ink-soft" aria-live="polite">
-                  {started
-                    ? `Загружено ${done} из ${total}`
-                    : `Кадров: ${total}`}
+                  {!started
+                    ? `Кадров: ${total}`
+                    : importId
+                      ? `В папке ${shown} из ${total} · оригиналы ${done} из ${total}`
+                      : `Загружено ${done} из ${total}`}
                   {failed > 0 && (
                     <span className="text-accent"> · не удалось: {failed}</span>
                   )}
@@ -851,14 +1072,21 @@ export default function UploadPrototype({
                     className="relative aspect-square overflow-hidden rounded-frame bg-paper-deep ring-1 ring-line"
                     title={`${i.name} · ${(i.size / 1048576).toFixed(1)} МБ${i.error ? ` · ${i.error}` : ""}`}
                   >
-                    <Image
-                      src={i.url}
-                      alt=""
-                      fill
-                      unoptimized
-                      sizes="120px"
-                      className={`object-cover transition-opacity ${i.status === "done" || !started ? "opacity-100" : "opacity-60"}`}
-                    />
+                    {i.url ? (
+                      <Image
+                        src={i.url}
+                        alt=""
+                        fill
+                        unoptimized
+                        sizes="120px"
+                        className={`object-cover transition-opacity ${i.status === "done" || i.shown || !started ? "opacity-100" : "opacity-60"}`}
+                      />
+                    ) : (
+                      // кадр по ссылке без миниатюры
+                      <span className="absolute inset-0 grid place-items-center break-all p-1.5 text-center text-[10px] leading-tight text-ink-faint">
+                        {i.name}
+                      </span>
+                    )}
                     {started && i.status !== "done" && (
                       <div className="absolute inset-x-0 bottom-0 h-1 bg-black/15">
                         <div

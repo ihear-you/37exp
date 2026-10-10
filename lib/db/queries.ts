@@ -131,8 +131,8 @@ export function listFramePreviews(userId: number, perRoll: number, onlyPublic = 
   return rows.map(toFrame);
 }
 
-/** Данные новой плёнки. Доступ сюда намеренно не входит: новая плёнка всегда «только я». */
-export type NewRoll = Omit<RollEdit, "visibility">;
+/** Данные новой плёнки. Доступа здесь нет: новая плёнка всегда «только я», меняется он отдельно (setRollVisibility). */
+export type NewRoll = RollEdit;
 
 /** Создаёт плёнку пользователя и возвращает её номер. Доступ «только я» и ключ для ссылки ставятся здесь. */
 export function insertRoll(userId: number, r: NewRoll): number {
@@ -150,12 +150,36 @@ export function saveRoll(userId: number, id: number, e: RollEdit): boolean {
   const res = getDb()
     .prepare(
       `UPDATE rolls SET title = @title, description = @description, film_id = @filmId, camera_id = @cameraId,
-              iso = @iso, format = @format, month = @month, year = @year, visibility = @visibility,
-              updated_at = datetime('now')
+              iso = @iso, format = @format, month = @month, year = @year, updated_at = datetime('now')
        WHERE id = @id AND user_id = @userId`,
     )
     .run({ ...e, cameraId: e.cameraId || null, id, userId });
   return res.changes > 0;
+}
+
+/** Кто видит плёнку. false, если плёнки нет или она чужая */
+export function setRollVisibility(userId: number, id: number, visibility: Visibility): boolean {
+  return (
+    getDb()
+      .prepare("UPDATE rolls SET visibility = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+      .run(visibility, id, userId).changes > 0
+  );
+}
+
+/**
+ * Удаляет плёнку вместе с кадрами и заданиями импорта (каскадом). Возвращает номера всех её кадров,
+ * включая помеченные удалёнными, чтобы убрать их файлы; null, если плёнки нет или она чужая.
+ */
+export function deleteRoll(userId: number, id: number): string[] | null {
+  const db = getDb();
+  return db
+    .transaction(() => {
+      if (!db.prepare("SELECT 1 FROM rolls WHERE id = ? AND user_id = ?").get(id, userId)) return null;
+      const frames = (db.prepare("SELECT id FROM frames WHERE roll_id = ?").all(id) as { id: string }[]).map((f) => f.id);
+      db.prepare("DELETE FROM rolls WHERE id = ? AND user_id = ?").run(id, userId);
+      return frames;
+    })
+    .immediate();
 }
 
 /** Кадр не стирается, а помечается удалённым. false, если кадра нет или он чужой */
@@ -335,6 +359,8 @@ export interface NewFrame {
   light: number;
   color: string;
   bytes: number;
+  /** Кадр по временной уменьшенной копии: оригинал придёт позже (finalizeFrame) */
+  provisional?: boolean;
 }
 
 /** "exists": кадр с таким номером в плёнке уже есть (повторная отправка); "forbidden": плёнки нет или она чужая */
@@ -345,11 +371,33 @@ export function insertFrame(userId: number, rollId: number, f: NewFrame): "ok" |
       if (!db.prepare("SELECT 1 FROM rolls WHERE id = ? AND user_id = ?").get(rollId, userId)) return "forbidden";
       if (db.prepare("SELECT 1 FROM frames WHERE roll_id = ? AND idx = ?").get(rollId, f.idx)) return "exists";
       db.prepare(
-        "INSERT INTO frames (id, roll_id, idx, w, h, hue, sat, light, color, bytes) VALUES (@id, @rollId, @idx, @w, @h, @hue, @sat, @light, @color, @bytes)",
-      ).run({ ...f, rollId });
+        `INSERT INTO frames (id, roll_id, idx, w, h, hue, sat, light, color, bytes, provisional)
+         VALUES (@id, @rollId, @idx, @w, @h, @hue, @sat, @light, @color, @bytes, @provisional)`,
+      ).run({ ...f, rollId, provisional: f.provisional ? 1 : 0 });
       return "ok";
     })
     .immediate();
+}
+
+/** Оригинал принят: кадр перестаёт быть временным и получает настоящие размеры, цвет и вес. false, если кадра нет или он чужой */
+export function finalizeFrame(userId: number, frameId: string, f: Omit<NewFrame, "id" | "idx" | "provisional">): boolean {
+  return (
+    getDb()
+      .prepare(
+        `UPDATE frames SET w = @w, h = @h, hue = @hue, sat = @sat, light = @light, color = @color, bytes = @bytes, provisional = 0
+         WHERE id = @frameId AND roll_id IN (SELECT id FROM rolls WHERE user_id = @userId)`,
+      )
+      .run({ ...f, frameId, userId }).changes > 0
+  );
+}
+
+/** Стирает временный кадр, оригинал которого принять нельзя (не хватило места, файл слишком большой) */
+export function removeProvisionalFrame(userId: number, frameId: string): boolean {
+  return (
+    getDb()
+      .prepare("DELETE FROM frames WHERE id = ? AND provisional = 1 AND roll_id IN (SELECT id FROM rolls WHERE user_id = ?)")
+      .run(frameId, userId).changes > 0
+  );
 }
 
 /** Сколько байт оригиналов лежит у пользователя (удалённые кадры тоже занимают место) */
@@ -366,17 +414,19 @@ export interface FrameAccess {
   ownerId: number;
   visibility: Visibility;
   shareKey: string | null;
+  /** Картинка временная (скоро заменится на копию с оригинала): долго кэшировать нельзя */
+  provisional: boolean;
 }
 
 /** Чьё это кадр и кто его может видеть. null, если кадра нет или он удалён */
 export function findFrameAccess(frameId: string): FrameAccess | null {
   const row = getDb()
     .prepare(
-      `SELECT r.user_id AS ownerId, r.visibility, r.share_key AS shareKey
+      `SELECT r.user_id AS ownerId, r.visibility, r.share_key AS shareKey, f.provisional
        FROM frames f JOIN rolls r ON r.id = f.roll_id WHERE f.id = ? AND f.deleted_at IS NULL`,
     )
-    .get(frameId) as FrameAccess | undefined;
-  return row ?? null;
+    .get(frameId) as (Omit<FrameAccess, "provisional"> & { provisional: number }) | undefined;
+  return row ? { ...row, provisional: row.provisional === 1 } : null;
 }
 
 /** Номер плёнки по ключу ссылки */
@@ -385,4 +435,105 @@ export function findRollIdByShareKey(key: string): { id: number; visibility: Vis
     | { id: number; visibility: Visibility }
     | undefined;
   return row ?? null;
+}
+
+// ── импорт по ссылке ──
+
+/**
+ * queued: ещё ничего не сделано; preview: кадр уже в плёнке по уменьшенной копии, оригинал впереди;
+ * working: качается и обрабатывается оригинал; done: оригинал принят; error: не получилось (можно повторить).
+ */
+export type ImportItemStatus = "queued" | "preview" | "working" | "done" | "error";
+
+export interface ImportItem {
+  pos: number;
+  name: string;
+  path: string;
+  size: number;
+  idx: number;
+  status: ImportItemStatus;
+  error: string | null;
+  /** Адрес уменьшенной копии у источника (может не быть) */
+  preview: string | null;
+  /** Кадр, созданный по уменьшенной копии: оригинал нужно принять именно в него */
+  frameId: string | null;
+}
+
+export interface ImportJob {
+  id: string;
+  userId: number;
+  rollId: number;
+  source: string;
+  sourceUrl: string;
+  items: ImportItem[];
+}
+
+const ITEM_COLUMNS = "pos, name, path, size, idx, status, error, preview, frame_id AS frameId";
+
+export function insertImport(
+  userId: number,
+  rollId: number,
+  source: string,
+  sourceUrl: string,
+  items: { name: string; path: string; size: number; idx: number; preview: string | null }[],
+): string {
+  const db = getDb();
+  const id = randomBytes(9).toString("hex");
+  db.transaction(() => {
+    db.prepare("INSERT INTO imports (id, user_id, roll_id, source, source_url) VALUES (?, ?, ?, ?, ?)").run(id, userId, rollId, source, sourceUrl);
+    const item = db.prepare("INSERT INTO import_items (import_id, pos, name, path, size, idx, preview) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    items.forEach((i, pos) => item.run(id, pos, i.name, i.path, i.size, i.idx, i.preview));
+  }).immediate();
+  return id;
+}
+
+/** Задание с файлами; userId = null: без проверки владельца (для фонового исполнителя) */
+export function findImport(id: string, userId: number | null): ImportJob | null {
+  const db = getDb();
+  const job = db
+    .prepare("SELECT id, user_id AS userId, roll_id AS rollId, source, source_url AS sourceUrl FROM imports WHERE id = ?")
+    .get(id) as Omit<ImportJob, "items"> | undefined;
+  if (!job || (userId !== null && job.userId !== userId)) return null;
+  const items = db.prepare(`SELECT ${ITEM_COLUMNS} FROM import_items WHERE import_id = ? ORDER BY pos`).all(id) as ImportItem[];
+  return { ...job, items };
+}
+
+/** Берёт следующий файл в работу над оригиналом (queued или preview → working) или null, если таких нет */
+export function takeImportItem(importId: string): ImportItem | null {
+  const db = getDb();
+  return db
+    .transaction(() => {
+      const item = db
+        .prepare(`SELECT ${ITEM_COLUMNS} FROM import_items WHERE import_id = ? AND status IN ('queued', 'preview') ORDER BY pos LIMIT 1`)
+        .get(importId) as ImportItem | undefined;
+      if (!item) return null;
+      db.prepare("UPDATE import_items SET status = 'working', error = NULL WHERE import_id = ? AND pos = ?").run(importId, item.pos);
+      return item;
+    })
+    .immediate();
+}
+
+/** frameId: undefined оставляет прежний кадр, null отвязывает (временный кадр стёрт) */
+export function setImportItem(importId: string, pos: number, status: ImportItemStatus, error: string | null = null, frameId?: string | null) {
+  if (frameId === undefined) {
+    getDb().prepare("UPDATE import_items SET status = ?, error = ? WHERE import_id = ? AND pos = ?").run(status, error, importId, pos);
+  } else {
+    getDb()
+      .prepare("UPDATE import_items SET status = ?, error = ?, frame_id = ? WHERE import_id = ? AND pos = ?")
+      .run(status, error, frameId, importId, pos);
+  }
+}
+
+/**
+ * Возвращает в очередь файлы с данными состояниями (повтор сбойных; брошенные «в работе» после перезапуска).
+ * Файл, у которого кадр уже есть, возвращается на шаг «оригинал», а не начинается заново.
+ */
+export function requeueImportItems(importId: string, from: ImportItemStatus[]): number {
+  const marks = from.map(() => "?").join(", ");
+  return getDb()
+    .prepare(
+      `UPDATE import_items SET status = CASE WHEN frame_id IS NULL THEN 'queued' ELSE 'preview' END, error = NULL
+       WHERE import_id = ? AND status IN (${marks})`,
+    )
+    .run(importId, ...from).changes;
 }
