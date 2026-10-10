@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Проект
 
-«[37exp]» — архив плёночных кадров (лента + папки), на русском. Next.js 16 (App Router, Turbopack), React 19, Tailwind v4, TypeScript. Бриф — `brief-mvp.md`, обзор экранов и настроек ленты — `README.md`.
+«[37exp]» — архив плёночных кадров (лента + папки), на русском. Next.js 16 (App Router, Turbopack), React 19, Tailwind v4, TypeScript. Фронт и бэкенд в одном приложении: база SQLite (`better-sqlite3`), вход через Яндекс/Google (`arctic`), обработка кадров (`sharp`). Бриф — `brief-mvp.md`, обзор экранов и настроек ленты — `README.md`, контракт формы загрузки и правки плёнки — `docs/upload-form-contract.md`.
 
-Next здесь не тот, что в обучающих данных: перед правкой роутинга/кэша/`next/image` сверяйся с `node_modules/next/dist/docs/`.
+Next здесь не тот, что в обучающих данных: перед правкой роутинга/кэша/`next/image` сверяйся с `node_modules/next/dist/docs/`. Уже встреченное: route config `dynamic` нет (вместо него `connection()` из `next/server`), из `route.ts` нельзя экспортировать ничего, кроме обработчиков, типы страниц — `PageProps<"/route">` (после удаления `.next` их возвращает `npx next typegen`).
 
 ## Команды
 
@@ -17,24 +17,43 @@ npm run dev      # http://localhost:3000 (конфиг превью: .claude/lau
 npm run build
 npm run lint     # eslint с react-hooks: запрещает setState/мутации в эффектах и во время рендера
 npx tsc --noEmit # отдельной команды typecheck нет
-npm run import   # scripts/import-photos.mjs: из папок в SOURCES делает public/photos/{f,l} и lib/photos/frames.json
+npm run db:reset # удаляет data/plenka.db; база создастся и заполнится заново при следующем запуске
+npm run import   # scripts/import-photos.mjs: из папок в SOURCES делает seed/photos/{f,l} и lib/photos/frames.json
 ```
 
-Тестов нет.
+Тестов нет. Второй `next dev` в той же папке не запустится, а порт 3000 может быть занят сервером из другой папки проекта (основная папка и worktree): проверь, чей сервер отвечает, прежде чем верить результату.
 
 ## Архитектура
 
-- **Данные — не база, а модуль.** В `main` справочники, плёнки (`ROLLS`) и кадры (`FRAMES` из `lib/photos/frames.json`) живут в `lib/catalog.ts`; всё читается синхронно на сервере и клиенте. Загрузка (`UploadPrototype.tsx`) ничего не сохраняет. `id` плёнки в `ROLLS` и номер в `SOURCES` скрипта импорта должны совпадать. Файлы кадров: `public/photos/f/<id>.jpg` (лента) и `l/` (просмотр), они лежат в git.
-- **Работа с БД/входом ведётся отдельно** (`better-sqlite3` в зависимостях, `photolab.db` в корне, OAuth Google/Яндекс через `arctic`, `lib/db`, `lib/auth`) — на момент написания это незакоммиченные правки в worktree `claude/upbeat-hugle-740cd1`, в `main` кода входа нет. Не предполагай, что `/login`, `requireUser` и т.п. существуют в `main`, проверь.
+- **Данные — SQLite, вход только через `lib/db/index.ts`.** Страницы, серверные действия и route handlers вызывают асинхронные функции фасада (`getMy…(userId)`, `getRollForViewer`, `getPublicProfile`, `createRoll`, `addFrame`…). Весь SQL — в `queries.ts` (синхронный), файл базы — `connection.ts` (WAL, соединение на `globalThis`), таблицы — `schema.ts`. Объект `background` в фасаде — те же операции без `connection()`, для фоновых задач вне запроса. Из клиентских компонентов `lib/db`, `lib/auth`, `lib/storage`, `lib/photos/*`, `lib/import/*` не импортируются: данные приходят пропсами.
+- **Миграции** — массив `MIGRATIONS` в `lib/db/schema.ts`, номер в `PRAGMA user_version` (сейчас 7). Применяются сами при открытии базы, в том числе на проде при деплое. Старые шаги не правятся, новый шаг добавляется в конец.
+- **Стартовые данные.** Пустая база заполняется из `lib/catalog.ts` (`ROLLS`, `CAMERAS`) и `lib/photos/frames.json`, их файлы лежат в `seed/photos` (в git). `PLENKA_SEED=0` отключает (так на проде). `FILMS` в `catalog.ts` — общий справочник плёнок, свои плёнки пользователя лежат в таблице `user_films` (id вида `u-xxxxxxxx`). `id` плёнки в `ROLLS` и номер в `SOURCES` скрипта импорта должны совпадать.
+- **Пользователи и вход** (`lib/auth/`). Войти может любой, у каждого свой архив. В cookie `session` случайный токен, в базе его sha256. `getViewer()` — кто смотрит; `requireUser()` — проверка в серверных действиях. Кнопки входа показываются для сервисов, чьи ключи заданы; на проде настроен только Яндекс. Почта из `OWNER_EMAILS` при первом входе забирает себе стартовый архив (пользователь 1), других прав у неё нет. Аккаунты сервисов сводятся по почте (`oauth_accounts`).
+- **Доступ к плёнке** — одно правило на весь сайт, `lib/access.ts` (`canView`): `private` (только автор), `link` (по ссылке `/s/<shareKey>`: ключ кладётся в cookie `rk`, дальше редирект на `/rolls/<id>`), `public` (видна на `/u/<handle>`). Новая плёнка всегда `private`; доступ меняется отдельным действием `setRollVisibilityAction`, не вместе с полями папки. Чужому и несуществующему отвечаем одинаково, 404.
+- **Файлы кадров вне `public/`** (`lib/storage/index.ts`): `storage/feed|full/<id>.jpg` и `storage/originals/<user>/<id>.<ext>`, запасной путь — `seed/photos`. Адреса `/photos/f|l/<id>.jpg` отдаёт `app/photos/[size]/[file]/route.ts` с проверкой доступа по cookie, поэтому `next/image` для кадров — только с `unoptimized` (оптимизатор ходит без cookie и получит 404).
+- **Загрузка.** `startUploadAction` создаёт или берёт плёнку и резервирует номера кадров, затем форма шлёт файлы по одному в `POST /api/rolls/<id>/frames` (3 параллельно, повтор с тем же `idx` безопасен). Приём кадра — `lib/photos/ingest.ts`, уменьшенные копии и цвет — `process.ts`, лимиты — `limits.ts` (`MAX_FILE_MB`, `USER_QUOTA_GB`). Удалённый кадр остаётся в базе и на диске с `deleted_at`; удаление плёнки (`deleteRollAction`) стирает кадры и файлы насовсем.
+- **Импорт с Яндекс Диска** (`lib/import/`). `yandex.ts` — открытый API публичных ссылок без токена; сервер ходит только на адреса из списка разрешённых и проверяет каждый редирект (защита от SSRF — не ослаблять). `runner.ts` — фоновая работа в два шага: по уменьшенным копиям с Диска создаются временные кадры (`frames.provisional = 1`), затем приходят оригиналы и заменяют их. Состояние — таблицы `imports`, `import_items`, форма опрашивает `GET /api/imports/<id>`; после перезапуска сервера задание подхватывается при следующем опросе. Вложенные папки не обходятся.
+- **Главная.** Гость и вошедший с пустой лентой видят `WelcomeReel`, вошедший с кадрами — ленту. `/upload` и `/rolls` для гостя ведут на `/login`.
 - **Лента** — `lib/feed.ts` (`planFeed`: ритм крупных/широких кадров и подписей, тёплый/холодный уклон) + `lib/masonry.ts` (раскладка без обрезки) + `Masonry.tsx`/`Feed.tsx`. Порядок хранится только в памяти вкладки (`lib/persist.ts`, kind `"memory"`) и меняется на каждую загрузку.
 - **`lib/persist.ts`** — мини-хранилище на `useSyncExternalStore`: на сервере и при первой отрисовке отдаёт запасное значение, чтобы гидрация не расходилась. Тот же приём (детерминированный `SEED`, `lib/rand.ts: mulberry32`) нужен везде, где SSR и клиент должны нарисовать одно и то же.
-- **Шапка и навигация** считаются в одном месте, `lib/nav.ts` (`useShowNav`, `useIsWelcomeScreen`), и используются и в `SiteHeader` (десктоп), и в `BottomBarNav` (ниже `md`) — условия нельзя дублировать. Пустое состояние (`hasFrames === false` на `/`, а также служебная `/preview-welcome`): без кнопок Лента/Папки/Загрузить, хедер прозрачный.
-- **Пустая лента — `WelcomeReel.tsx`**: полноэкранный (`fixed inset-0`) коллаж на CSS-keyframes (`tile-burst` в `globals.css`), плитки по зонам 4×4, рост от центра экрана через `transform-origin` в процентах, перезапуск по `onAnimationEnd` + `key`. Фото берёт из `lib/unsplash.ts`, при отсутствии ключа/ответа — из локальных кадров. `/preview-welcome` — dev-страница, рисует его независимо от наличия кадров.
-- **Unsplash** (`lib/unsplash.ts`): только серверный вызов, ключ `UNSPLASH_ACCESS_KEY` в `.env.local` (в git не попадает). Демо-лимит 50 запросов/ч, поэтому один запрос «motion blur» и `revalidate` сутки. Кредит «Фото сообщества Unsplash» в углу обязателен.
+- **Шапка и навигация** считаются в одном месте, `lib/nav.ts` (`useShowNav`, `useIsWelcomeScreen`), и используются и в `SiteHeader` (десктоп), и в `BottomBarNav` (ниже `md`) — условия нельзя дублировать. Пустое состояние (`hasFrames === false` на `/`, а также служебная `/preview-welcome`): без кнопок Лента/Папки/Загрузить, хедер прозрачный. Аватар и выход — `UserMenu.tsx` (`signOutAction`), `user` приходит из `app/layout.tsx`.
+- **Страница плёнки** (`RollDetail.tsx`): правки показываются сразу через `useOptimistic` и откатываются, если действие вернуло `false`. Слева от «Изменить» — кнопка доступа (значок ссылки + `VISIBILITIES[].short`), «Удалить» папку — в окне правки с подтверждением.
+- **Заставка — `WelcomeReel.tsx`**: полноэкранный (`fixed inset-0`) коллаж на CSS-keyframes (`tile-burst` в `globals.css`), плитки по зонам 4×4, рост от центра экрана через `transform-origin` в процентах, перезапуск по `onAnimationEnd` + `key`. Фото берёт из `lib/unsplash.ts`; без них плитки остаются цветными заглушками (локальные кадры закрыты доступом, запрашивать их нельзя). `/preview-welcome` — dev-страница, рисует её независимо от наличия кадров.
+- **Unsplash** (`lib/unsplash.ts`): только серверный вызов, ключ `UNSPLASH_ACCESS_KEY`. Демо-лимит 50 запросов/ч, поэтому один запрос «motion blur» и кэш на сутки в памяти и в `data/unsplash-cache.json`; при ошибке или лимите отдаются устаревшие фото, повтор не чаще раза в 5 минут. Не добавляй запросов к Unsplash на каждый заход. Кредит «Фото сообщества Unsplash» в углу обязателен.
 - **Стили**: цвета и радиусы — токены в `:root` в `app/globals.css` (`--round-control`, `--round-frame`, проброшены в Tailwind как `rounded-control`/`rounded-frame` через `@theme inline`). Курсива нет; Anton — только логотип (`font-logo`), весь текст — IBM Plex Sans.
+
+## Окружение
+
+Переменные читаются при старте, образец — `.env.example`: `APP_URL` (от него адреса возврата OAuth и признак `Secure` у cookie), `YANDEX_CLIENT_ID/SECRET`, `GOOGLE_CLIENT_ID/SECRET`, `OWNER_EMAILS`, `UNSPLASH_ACCESS_KEY`, `PLENKA_DB_PATH`, `PLENKA_STORAGE_DIR`, `PLENKA_SEED`, `MAX_FILE_MB`, `USER_QUOTA_GB`. В git не попадают: `.env*` (кроме `.env.example`), `data/*.db`, `data/unsplash-cache.json`, `storage/`.
+
+## Прод
+
+Сервер, деплой и бэкапы описаны в `CLAUDE.local.md` (его нет в git: репозиторий открытый). Деплой — только после явного «да» пользователя.
 
 ## Подводные камни
 
-- **Worktrees:** у каждого worktree свой `.env.local` (gitignored) — в новом нет `UNSPLASH_ACCESS_KEY`, и пустое состояние тихо переключается на локальные кадры. Stash общий для всех worktree: не используй голый `git stash`/`pop`.
-- **Прод `https://37exp.ru`** (nginx перед Next): при переносе нужны `public/photos/**` и переменная `UNSPLASH_ACCESS_KEY` в окружении сервера, иначе `/photos/f/*.jpg` отдаёт 404, а пустая лента остаётся без кадров.
+- **Worktrees:** у каждого worktree свои `.env.local`, `data/plenka.db` и `storage/` (все gitignored) — в новом нет ключей входа и Unsplash, архив пустой. Stash общий для всех worktree: не используй голый `git stash`/`pop`.
+- **Старое не трогать:** `photolab.db` в корне и `public/uploads/` остались от ранней версии и кодом не используются; не удаляй и не меняй их без просьбы.
+- **Проверка в превью под входом:** cookie `session` привязана к `localhost` без порта, сервер на другом порту её перезапишет. Перед выполнением JS на странице проверь `location.origin`: после редиректа на вход это может быть уже сайт Яндекса.
 - **Проверка анимации в превью:** в скрытой панели браузера `document.hidden === true`, и скриншоты выходят чёрными — это не пустота, сначала выведи вкладку на передний план.
+- **zsh:** glob без совпадений (`--include=*.ts`, `.env*`) роняет команду — бери шаблоны в кавычки.
