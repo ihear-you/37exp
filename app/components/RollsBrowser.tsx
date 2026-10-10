@@ -1,9 +1,9 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { feedSrc, MONTHS, type RollView } from "@/lib/catalog";
+import PhotoFan from "./PhotoFan";
 
 export interface RollCard extends RollView {
   /** Первые кадры плёнки для «контактной полоски» на карточке */
@@ -119,37 +119,14 @@ export default function RollsBrowser({ rolls }: { rolls: RollCard[] }) {
   );
 }
 
-/** Сколько кадров плёнки веером на карточке и на сколько градусов раскрывается веер между соседними */
-const FAN_MAX = 4;
-const FAN_STEP = 6;
-const FAN_STEP_HOVER = 9;
-/** Сдвиг соседних кадров в сторону, % ширины самого кадра */
-const FAN_SPREAD = 43;
-const FAN_SPREAD_HOVER = 50;
-
-/** Папка: кадры веером одного формата 3:4 (горизонтальные обрезаются, целиком их видно внутри папки),
-    под ними название */
+/** Папка: кадры веером (PhotoFan.tsx; целиком их видно внутри папки), под ними название */
 function RollCardView({ roll }: { roll: RollCard }) {
-  const fan = roll.strip.slice(0, FAN_MAX);
-  const mid = (fan.length - 1) / 2;
-
   return (
     <Link
       href={`/rolls/${roll.id}`}
       className="group block rounded-[20px] bg-paper-light p-5 text-center shadow-[var(--card-ring)] transition-shadow hover:shadow-[var(--card-ring-hover)]"
-      style={{ ["--step" as string]: FAN_STEP, ["--step-hover" as string]: FAN_STEP_HOVER, ["--spread" as string]: FAN_SPREAD, ["--spread-hover" as string]: FAN_SPREAD_HOVER }}
     >
-      <div className="relative aspect-[2/1] w-full">
-        {fan.map((f, i) => (
-          <div
-            key={f.id}
-            className="absolute bottom-[4%] left-1/2 aspect-[3/4] w-[34%] origin-bottom overflow-hidden rounded-[14px] shadow-[0_4px_14px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-out [transform:translateX(calc(-50%+var(--k)*var(--spread)*1%))_rotate(calc(var(--k)*var(--step)*1deg))] group-hover:[transform:translateX(calc(-50%+var(--k)*var(--spread-hover)*1%))_rotate(calc(var(--k)*var(--step-hover)*1deg))]"
-            style={{ ["--k" as string]: i - mid, zIndex: 10 - Math.round(Math.abs(i - mid)), backgroundColor: f.color }}
-          >
-            <Image src={feedSrc(f.id)} alt="" fill unoptimized sizes="200px" className="object-cover" />
-          </div>
-        ))}
-      </div>
+      <PhotoFan pics={roll.strip.map((f) => ({ id: f.id, src: feedSrc(f.id), color: f.color }))} />
       <h2 className="mt-6 text-[15px] leading-snug group-hover:text-accent">{roll.title}</h2>
       <p className="mt-0.5 text-[13px] text-ink-soft">
         {[roll.camera, roll.iso ? `ISO ${roll.iso}` : null, roll.format === "120" ? "120" : null].filter(Boolean).join(" · ")}

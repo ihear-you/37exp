@@ -86,7 +86,17 @@ function originFor(slot: Slot): string {
   return `${ox}% ${oy}%`;
 }
 
-export default function WelcomeReel({ photos }: { photos: EditorialPhoto[] }) {
+/** Кнопка входа на заставке: сервис, ключи которого заданы (см. configuredProviders в lib/auth/providers.ts) */
+export interface SignInOption {
+  id: string;
+  label: string;
+}
+
+const cta = "flex items-center gap-1.5 rounded-control bg-ink px-6 py-2.5 text-sm text-paper transition-opacity hover:opacity-85";
+
+/** signIn: заставку видит гость, и кнопка одна, «Войти» (сразу к сервису входа, без страницы /login).
+ * Без signIn заставку видит вошедший с пустым архивом, и кнопка ведёт на загрузку. */
+export default function WelcomeReel({ photos, signIn }: { photos: EditorialPhoto[]; signIn?: SignInOption[] }) {
   const pool = useMemo<Pic[]>(
     () =>
       photos.length > 0
@@ -98,7 +108,19 @@ export default function WelcomeReel({ photos }: { photos: EditorialPhoto[] }) {
     [photos],
   );
 
+  // Подпись Unsplash показываем, только когда на экране их фото. Ссылка одна, мест два (см. ниже)
   const credit = photos[0]?.credit;
+  const creditLink = (className: string) =>
+    credit && (
+      <a
+        href="https://unsplash.com/?utm_source=photo-lab&utm_medium=referral"
+        target="_blank"
+        rel="noreferrer"
+        className={`text-[11px] text-ink-faint transition-colors hover:text-ink-soft ${className}`}
+      >
+        Фото сообщества Unsplash
+      </a>
+    );
 
   return (
     // fixed на весь экран, а не только под хедером: хедер здесь прозрачный (см. SiteHeader.tsx,
@@ -112,28 +134,45 @@ export default function WelcomeReel({ photos }: { photos: EditorialPhoto[] }) {
       </div>
 
       {/* Полоса с текстом и кнопкой: не часть композиции, поэтому лежит поверх на своём фоне-скриме */}
-      <div className="absolute inset-x-0 bottom-0 z-40 flex flex-col items-center bg-gradient-to-t from-black via-black/85 to-transparent px-4 pb-[52px] pt-28 text-center sm:pb-[60px]">
-        <p className="max-w-sm text-ink-soft">Соберите архив и смотрите кадры в удобном формате</p>
-        <Link
-          href="/upload"
-          className="mt-5 flex items-center gap-1.5 rounded-control bg-ink px-6 py-2.5 text-sm text-paper transition-opacity hover:opacity-85"
-        >
-          <UploadIcon width={16} height={16} />
-          Загрузить первую плёнку
-        </Link>
+      <div
+        className={`absolute inset-x-0 bottom-0 z-40 flex flex-col items-center bg-gradient-to-t from-black via-black/85 to-transparent px-4 pt-28 text-center md:pb-[60px] ${
+          credit ? "pb-6" : "pb-[52px]"
+        }`}
+      >
+        {signIn ? (
+          <>
+            <h1 className="text-xl text-ink sm:text-2xl">36 кадров и ещё один</h1>
+            <p className="mt-2 max-w-sm text-ink-soft">Архив для плёнок, которые вы уже проявили</p>
+            <div className="mt-5 flex flex-wrap justify-center gap-3">
+              {/* обычные ссылки, не Link: маршрут ставит cookie и ведёт на другой сайт, предзагружать его нельзя */}
+              {signIn.map((p) => (
+                <a key={p.id} href={`/api/auth/${p.id}?next=%2F`} className={cta}>
+                  Войти через {p.label}
+                </a>
+              ))}
+              {signIn.length === 0 && (
+                <Link href="/login" className={cta}>
+                  Войти
+                </Link>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <h1 className="text-xl text-ink sm:text-2xl">Архив пока пуст</h1>
+            <p className="mt-2 max-w-sm text-ink-soft">Загрузите первую плёнку, и здесь появится лента</p>
+            <Link href="/upload" className={`mt-5 ${cta}`}>
+              <UploadIcon width={16} height={16} />
+              Загрузить первую плёнку
+            </Link>
+          </>
+        )}
+        {/* ниже md подпись Unsplash стоит под кнопкой: в углу узкого экрана она оказывалась вплотную к кнопке */}
+        {creditLink("mt-5 md:hidden")}
       </div>
 
-      {/* Подпись Unsplash — в правом нижнем углу, с тем же отступом от края, что у логотипа слева */}
-      {credit && (
-        <a
-          href="https://unsplash.com/?utm_source=photo-lab&utm_medium=referral"
-          target="_blank"
-          rel="noreferrer"
-          className="absolute bottom-3 right-0 z-40 px-3 text-[11px] text-ink-faint transition-colors hover:text-ink-soft md:px-5"
-        >
-          Фото сообщества Unsplash
-        </a>
-      )}
+      {/* от md подпись Unsplash — в правом нижнем углу, с тем же отступом от края, что у логотипа слева */}
+      {creditLink("absolute bottom-3 right-0 z-40 hidden px-5 md:block")}
     </div>
   );
 }

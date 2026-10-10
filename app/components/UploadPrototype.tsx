@@ -15,6 +15,7 @@ import {
 } from "@/lib/catalog";
 import { parseFolderName } from "@/lib/folder-name";
 import { createStore, useStore } from "@/lib/persist";
+import { isImageFile, takeUploadHandoff, type LinkListing } from "@/lib/upload-handoff";
 import {
   createCameraAction,
   createFilmAction,
@@ -73,7 +74,6 @@ interface Item {
   shown?: boolean;
 }
 
-const IMAGE = /\.(jpe?g|png|tiff?|webp|heic)$/i;
 const NEW = "__new__";
 const PARALLEL = 3;
 const now = new Date();
@@ -256,7 +256,7 @@ export default function UploadPrototype({
   const addFiles = useCallback(
     (files: File[], folder: string | null) => {
       const images = files
-        .filter((f) => f.type.startsWith("image/") || IMAGE.test(f.name))
+        .filter(isImageFile)
         .sort((a, b) => a.name.localeCompare(b.name, "ru", { numeric: true }));
       if (!images.length) return;
       // источники не смешиваются: кадры с компьютера заменяют найденные по ссылке
@@ -286,6 +286,29 @@ export default function UploadPrototype({
     [mode, applyFolderHint],
   );
 
+  // кадры, найденные по ссылке, заменяют выбранные раньше
+  const showListing = useCallback(
+    (url: string, res: LinkListing) => {
+      urls.current.forEach((u) => URL.revokeObjectURL(u));
+      urls.current = [];
+      setItems(
+        res.files.map((f, n) => ({
+          id: -(n + 1),
+          name: f.name,
+          size: f.size,
+          url: f.preview ?? undefined,
+          idx: 0,
+          status: "queued" as const,
+          progress: 0,
+        })),
+      );
+      setLink({ url, name: res.name, skipped: res.skipped, tooBig: res.tooBig });
+      if (mode === "new") applyFolderHint(res.name);
+      else setHint(null);
+    },
+    [mode, applyFolderHint],
+  );
+
   // кадры по ссылке: сервер смотрит, что лежит на Диске; сами файлы скачает он же после «Загрузить»
   const findByLink = async () => {
     const url = linkUrl.trim();
@@ -298,23 +321,20 @@ export default function UploadPrototype({
       setLinkError(res.error);
       return;
     }
-    urls.current.forEach((u) => URL.revokeObjectURL(u));
-    urls.current = [];
-    setItems(
-      res.files.map((f, n) => ({
-        id: -(n + 1),
-        name: f.name,
-        size: f.size,
-        url: f.preview ?? undefined,
-        idx: 0,
-        status: "queued" as const,
-        progress: 0,
-      })),
-    );
-    setLink({ url, name: res.name, skipped: res.skipped, tooBig: res.tooBig });
-    if (mode === "new") applyFolderHint(res.name);
-    else setHint(null);
+    showListing(url, res);
   };
+
+  // Кадры выбраны ещё до формы, на пустой странице папок (EmptyArchive.tsx): забираем их при открытии.
+  // Через таймер, а не сразу в эффекте: в dev React запускает эффекты дважды, и первый запуск отменяется
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const handoff = takeUploadHandoff();
+      if (!handoff) return;
+      if (handoff.kind === "files") addFiles(handoff.files, handoff.folder);
+      else showListing(handoff.url, handoff.listing);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [addFiles, showListing]);
 
   // ход импорта по ссылке: сервер качает сам, форма только спрашивает состояние
   useEffect(() => {

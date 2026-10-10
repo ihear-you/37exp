@@ -62,10 +62,13 @@ export default function SiteHeader({ hasFrames, rollCount, user }: { hasFrames: 
           </div>
         )}
 
-        {/* аватар с выходом (или «Войти») виден всегда, в том числе на телефоне и на пустой ленте */}
-        <div className={showNav ? "ml-auto md:ml-4" : "ml-auto"}>
-          <UserMenu user={user} />
-        </div>
+        {/* аватар с выходом (или «Войти») виден всегда, в том числе на телефоне и на пустой ленте.
+            Кроме заставки для гостя: там «Войти» — главная кнопка по центру, вторая в углу её дублирует */}
+        {!(welcome && !user) && (
+          <div className={showNav ? "ml-auto md:ml-4" : "ml-auto"}>
+            <UserMenu user={user} />
+          </div>
+        )}
       </nav>
     </header>
   );
