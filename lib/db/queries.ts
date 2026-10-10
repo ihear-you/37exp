@@ -287,15 +287,20 @@ export function findUserByHandle(handle: string): UserRecord | null {
   return row ?? null;
 }
 
-export function findSessionUser(tokenHash: string): UserRecord | null {
-  const row = getDb()
+/** renew: продлить сессию до renew.until, если она истекает раньше renew.ifBefore (секунды Unix) */
+export function findSessionUser(tokenHash: string, renew?: { until: number; ifBefore: number }): UserRecord | null {
+  const db = getDb();
+  const row = db
     .prepare(
-      `SELECT u.id, u.handle, u.name, u.email, u.avatar_url AS avatarUrl
+      `SELECT u.id, u.handle, u.name, u.email, u.avatar_url AS avatarUrl, s.expires_at AS expiresAt
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.id = ? AND s.expires_at > ?`,
     )
-    .get(tokenHash, Math.floor(Date.now() / 1000)) as UserRecord | undefined;
-  return row ?? null;
+    .get(tokenHash, Math.floor(Date.now() / 1000)) as (UserRecord & { expiresAt: number }) | undefined;
+  if (!row) return null;
+  const { expiresAt, ...user } = row;
+  if (renew && expiresAt < renew.ifBefore) db.prepare("UPDATE sessions SET expires_at = ? WHERE id = ?").run(renew.until, tokenHash);
+  return user;
 }
 
 export function removeSession(tokenHash: string) {

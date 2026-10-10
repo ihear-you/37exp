@@ -263,9 +263,10 @@ export async function createSession(tokenHash: string, userId: number, expiresAt
   q.insertSession(tokenHash, userId, expiresAt);
 }
 
-export async function getSessionUser(tokenHash: string): Promise<q.UserRecord | null> {
+/** renew: продлить сессию до renew.until, если она истекает раньше renew.ifBefore (секунды Unix) */
+export async function getSessionUser(tokenHash: string, renew?: { until: number; ifBefore: number }): Promise<q.UserRecord | null> {
   await connection();
-  return q.findSessionUser(tokenHash);
+  return q.findSessionUser(tokenHash, renew);
 }
 
 export async function deleteSession(tokenHash: string): Promise<void> {
