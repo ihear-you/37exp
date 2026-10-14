@@ -1,6 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
-import { getImport } from "@/lib/db";
+import { background, getImport } from "@/lib/db";
 import { isImportRunning, resumeImport } from "@/lib/import/runner";
 
 // Ход импорта по ссылке: клиент опрашивает этот адрес, пока задание не закончится.
@@ -13,6 +13,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   let job = await getImport(user.id, id);
   if (!job) return Response.json({ error: "notfound" }, { status: 404 });
+  // форма открыта: загрузка жива (без опросов уборщик через 3 минуты сочтёт её брошенной, lib/uploads.ts)
+  background.touchUpload(user.id, id);
 
   const pending = (j: typeof job) => j!.items.some((i) => i.status === "queued" || i.status === "preview" || i.status === "working");
   if (pending(job) && !isImportRunning(id)) {

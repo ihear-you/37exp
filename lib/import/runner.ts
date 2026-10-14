@@ -44,10 +44,13 @@ async function work(id: string) {
   const job = background.findImport(id);
   if (!job) return;
   const start = Date.now();
+  // загрузка с тем же номером: кадры помечаются ею и не добавляются, если её отменили (lib/uploads.ts).
+  // У старых заданий загрузки нет
+  const uploadId = background.touchUpload(job.userId, id) ? id : undefined;
   const left = job.items.filter((i) => i.status !== "done" && i.status !== "error");
   log("import", `${id}: старт, плёнка ${job.rollId}, файлов ${job.items.length}, осталось ${left.length} (${mb(left.reduce((s, i) => s + i.size, 0))})`);
-  await showPreviews(id, job.userId, job.rollId, job.items);
-  await fetchOriginals(id, job.userId, job.rollId, job.sourceUrl);
+  await showPreviews(id, job.userId, job.rollId, job.items, uploadId);
+  await fetchOriginals(id, job.userId, job.rollId, job.sourceUrl, uploadId);
   const after = background.findImport(id)?.items ?? [];
   log(
     "import",
@@ -56,7 +59,7 @@ async function work(id: string) {
 }
 
 /** Шаг 1. Сбой здесь не страшен: файл остаётся в очереди и на шаге 2 придёт сразу оригиналом */
-async function showPreviews(id: string, userId: number, rollId: number, items: ImportItem[]) {
+async function showPreviews(id: string, userId: number, rollId: number, items: ImportItem[], uploadId?: string) {
   const todo = items.filter((i) => i.status === "queued" && i.preview && !i.frameId);
   if (!todo.length) return;
   const start = Date.now();
@@ -65,7 +68,7 @@ async function showPreviews(id: string, userId: number, rollId: number, items: I
   const worker = async () => {
     for (let item = todo[at++]; item; item = todo[at++]) {
       try {
-        const result = await ingestPreview(userId, rollId, item.idx, await fetchYandexPreview(item.preview!));
+        const result = await ingestPreview(userId, rollId, item.idx, await fetchYandexPreview(item.preview!), uploadId);
         if (result.status === "ok") {
           background.setImportItem(id, item.pos, "preview", null, result.id);
           shown++;
@@ -83,7 +86,7 @@ async function showPreviews(id: string, userId: number, rollId: number, items: I
 type Fetched = { data: Buffer } | { error: string };
 
 /** Шаг 2 */
-async function fetchOriginals(id: string, userId: number, rollId: number, sourceUrl: string) {
+async function fetchOriginals(id: string, userId: number, rollId: number, sourceUrl: string, uploadId?: string) {
   // Скачивание и обработка идут внахлёст: пока текущий кадр обрабатывается, следующий уже качается.
   // Качать больше одного оригинала сразу смысла нет (упираемся в скорость канала), а так время кадра
   // равно большему из двух шагов, а не их сумме. В памяти при этом не больше двух файлов.
@@ -120,7 +123,7 @@ async function fetchOriginals(id: string, userId: number, rollId: number, source
             if (result.removed) frameId = null;
           }
         } else {
-          const result = await ingestPhoto(userId, rollId, item.idx, got.data);
+          const result = await ingestPhoto(userId, rollId, item.idx, got.data, uploadId);
           if (result.status === "error") error = result.error;
         }
       } else if (frameId && (got.error === "size" || got.error === "quota")) {

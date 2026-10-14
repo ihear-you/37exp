@@ -366,6 +366,8 @@ export interface NewFrame {
   bytes: number;
   /** Кадр по временной уменьшенной копии: оригинал придёт позже (finalizeFrame) */
   provisional?: boolean;
+  /** Кадр пришёл в незаконченной загрузке с устройства (uploads); если её уже отменили, кадр не добавляется */
+  uploadId?: string | null;
 }
 
 /** "exists": кадр с таким номером в плёнке уже есть (повторная отправка); "forbidden": плёнки нет или она чужая */
@@ -374,11 +376,15 @@ export function insertFrame(userId: number, rollId: number, f: NewFrame): "ok" |
   return db
     .transaction((): "ok" | "exists" | "forbidden" => {
       if (!db.prepare("SELECT 1 FROM rolls WHERE id = ? AND user_id = ?").get(rollId, userId)) return "forbidden";
+      // загрузку отменили, пока кадр обрабатывался: не добавляем
+      if (f.uploadId && !db.prepare("SELECT 1 FROM uploads WHERE id = ? AND user_id = ? AND roll_id = ?").get(f.uploadId, userId, rollId)) {
+        return "forbidden";
+      }
       if (db.prepare("SELECT 1 FROM frames WHERE roll_id = ? AND idx = ?").get(rollId, f.idx)) return "exists";
       db.prepare(
-        `INSERT INTO frames (id, roll_id, idx, w, h, hue, sat, light, color, bytes, provisional)
-         VALUES (@id, @rollId, @idx, @w, @h, @hue, @sat, @light, @color, @bytes, @provisional)`,
-      ).run({ ...f, rollId, provisional: f.provisional ? 1 : 0 });
+        `INSERT INTO frames (id, roll_id, idx, w, h, hue, sat, light, color, bytes, provisional, upload_id)
+         VALUES (@id, @rollId, @idx, @w, @h, @hue, @sat, @light, @color, @bytes, @provisional, @uploadId)`,
+      ).run({ ...f, rollId, provisional: f.provisional ? 1 : 0, uploadId: f.uploadId ?? null });
       return "ok";
     })
     .immediate();
@@ -394,6 +400,108 @@ export function finalizeFrame(userId: number, frameId: string, f: Omit<NewFrame,
       )
       .run({ ...f, frameId, userId }).changes > 0
   );
+}
+
+/** Свой кадр по номеру в плёнке (повторная отправка копии после обрыва связи). null, если его нет или плёнка чужая */
+export function findOwnFrameAt(userId: number, rollId: number, idx: number): { id: string; provisional: boolean } | null {
+  const row = getDb()
+    .prepare(
+      `SELECT f.id, f.provisional FROM frames f JOIN rolls r ON r.id = f.roll_id
+       WHERE r.user_id = ? AND f.roll_id = ? AND f.idx = ? AND f.deleted_at IS NULL`,
+    )
+    .get(userId, rollId, idx) as { id: string; provisional: number } | undefined;
+  return row ? { id: row.id, provisional: row.provisional === 1 } : null;
+}
+
+/** Свой кадр: временный ли он и в какой загрузке пришёл. null, если кадра нет, он удалён или чужой */
+export function findOwnFrame(userId: number, frameId: string): { provisional: boolean; uploadId: string | null } | null {
+  const row = getDb()
+    .prepare(
+      `SELECT f.provisional, f.upload_id AS uploadId FROM frames f JOIN rolls r ON r.id = f.roll_id
+       WHERE f.id = ? AND r.user_id = ? AND f.deleted_at IS NULL`,
+    )
+    .get(frameId, userId) as { provisional: number; uploadId: string | null } | undefined;
+  return row ? { provisional: row.provisional === 1, uploadId: row.uploadId } : null;
+}
+
+// ── загрузки с устройства (целиком или никак) ──
+
+export function insertUpload(id: string, userId: number, rollId: number, newRoll: boolean, expected: number) {
+  getDb()
+    .prepare("INSERT INTO uploads (id, user_id, roll_id, new_roll, expected, touched_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id, userId, rollId, newRoll ? 1 : 0, expected, Math.floor(Date.now() / 1000));
+}
+
+/** Незаконченная загрузка пользователя (и отметка «ещё жива»). null, если её нет: закончена или отменена */
+export function touchUpload(userId: number, id: string): { rollId: number } | null {
+  const db = getDb();
+  const row = db.prepare("SELECT roll_id AS rollId FROM uploads WHERE id = ? AND user_id = ?").get(id, userId) as { rollId: number } | undefined;
+  if (row) db.prepare("UPDATE uploads SET touched_at = ? WHERE id = ?").run(Math.floor(Date.now() / 1000), id);
+  return row ?? null;
+}
+
+/**
+ * Загрузка закончена: кадры остаются. Кадры этой загрузки, так и не получившие оригинал, стираются
+ * (возвращаются их id, чтобы убрать файлы). null, если загрузки нет.
+ */
+export function completeUpload(userId: number, id: string): string[] | null {
+  const db = getDb();
+  return db
+    .transaction(() => {
+      if (!db.prepare("SELECT 1 FROM uploads WHERE id = ? AND user_id = ?").get(id, userId)) return null;
+      const temp = (db.prepare("SELECT id FROM frames WHERE upload_id = ? AND provisional = 1").all(id) as { id: string }[]).map((f) => f.id);
+      db.prepare("DELETE FROM frames WHERE upload_id = ? AND provisional = 1").run(id);
+      db.prepare("UPDATE frames SET upload_id = NULL WHERE upload_id = ?").run(id);
+      db.prepare("DELETE FROM uploads WHERE id = ?").run(id);
+      return temp;
+    })
+    .immediate();
+}
+
+/**
+ * Загрузку бросили (ушли со страницы): стираются все её кадры, а плёнка, созданная этой загрузкой, —
+ * если в ней не осталось других кадров. Возвращает id стёртых кадров (для файлов) или null, если загрузки нет.
+ */
+export function abortUpload(userId: number, id: string): { frames: string[]; rollId: number; rollRemoved: boolean } | null {
+  const db = getDb();
+  return db
+    .transaction(() => {
+      const up = db.prepare("SELECT roll_id AS rollId, new_roll AS newRoll FROM uploads WHERE id = ? AND user_id = ?").get(id, userId) as
+        | { rollId: number; newRoll: number }
+        | undefined;
+      if (!up) return null;
+      const frames = (db.prepare("SELECT id FROM frames WHERE upload_id = ?").all(id) as { id: string }[]).map((f) => f.id);
+      db.prepare("DELETE FROM frames WHERE upload_id = ?").run(id);
+      db.prepare("DELETE FROM uploads WHERE id = ?").run(id);
+      // импорт с Диска (его задание под тем же номером): без задания исполнитель не найдёт следующий файл и остановится
+      db.prepare("DELETE FROM imports WHERE id = ? AND user_id = ?").run(id, userId);
+      const rollRemoved =
+        up.newRoll === 1 &&
+        !db.prepare("SELECT 1 FROM frames WHERE roll_id = ?").get(up.rollId) &&
+        !db.prepare("SELECT 1 FROM imports WHERE roll_id = ?").get(up.rollId) &&
+        db.prepare("DELETE FROM rolls WHERE id = ? AND user_id = ?").run(up.rollId, userId).changes > 0;
+      return { frames, rollId: up.rollId, rollRemoved };
+    })
+    .immediate();
+}
+
+/**
+ * Загрузки, от которых давно ничего не приходило: что обещано и что дошло. Импорт с Диска (задание под тем же
+ * номером) форма опрашивает каждые полторы секунды, поэтому для него «давно» короче: importBefore
+ */
+export function findStaleUploads(
+  before: number,
+  importBefore: number,
+): { id: string; userId: number; expected: number; done: number; temp: number }[] {
+  return getDb()
+    .prepare(
+      `SELECT u.id, u.user_id AS userId, u.expected,
+         (SELECT COUNT(*) FROM frames f WHERE f.upload_id = u.id AND f.provisional = 0) AS done,
+         (SELECT COUNT(*) FROM frames f WHERE f.upload_id = u.id AND f.provisional = 1) AS temp
+       FROM uploads u
+       WHERE u.touched_at < CASE WHEN EXISTS (SELECT 1 FROM imports i WHERE i.id = u.id) THEN ? ELSE ? END`,
+    )
+    .all(importBefore, before) as { id: string; userId: number; expected: number; done: number; temp: number }[];
 }
 
 /** Стирает временный кадр, оригинал которого принять нельзя (не хватило места, файл слишком большой) */

@@ -26,7 +26,8 @@ export type IngestResult =
 
 const newId = () => randomBytes(6).toString("hex");
 
-export async function ingestPhoto(userId: number, rollId: number, idx: number, original: Buffer): Promise<IngestResult> {
+/** uploadId: кадр из загрузки с устройства (lib/uploads.ts); у импорта по ссылке его нет */
+export async function ingestPhoto(userId: number, rollId: number, idx: number, original: Buffer, uploadId?: string): Promise<IngestResult> {
   const label = `плёнка ${rollId} №${idx}, ${mb(original.length)}`;
   if (original.length > MAX_FILE_BYTES) return { status: "error", error: "size" };
   if (background.usedBytes(userId) + original.length > USER_QUOTA_BYTES) return { status: "error", error: "quota" };
@@ -53,7 +54,7 @@ export async function ingestPhoto(userId: number, rollId: number, idx: number, o
   log("ingest", `${label}: обработка ${processed} мс, запись ${since(saving)} мс`);
 
   const { w, h, hue, sat, light, color } = photo;
-  const result = background.addFrame(userId, rollId, { id, idx, w, h, hue, sat, light, color, bytes: original.length });
+  const result = background.addFrame(userId, rollId, { id, idx, w, h, hue, sat, light, color, bytes: original.length, uploadId });
   if (result !== "ok") {
     await deletePhoto(userId, id, ext);
     return result === "exists" ? { status: "exists" } : { status: "error", error: "roll" };
@@ -65,7 +66,7 @@ export async function ingestPhoto(userId: number, rollId: number, idx: number, o
  * Шаг 1 импорта: временный кадр по уменьшенной копии. Копия кладётся как есть (и для ленты, и для
  * просмотра), без пересжатия, поэтому это быстро. Места в лимите временный кадр не занимает.
  */
-export async function ingestPreview(userId: number, rollId: number, idx: number, preview: Buffer): Promise<IngestResult> {
+export async function ingestPreview(userId: number, rollId: number, idx: number, preview: Buffer, uploadId?: string): Promise<IngestResult> {
   const start = Date.now();
   let info;
   try {
@@ -83,7 +84,7 @@ export async function ingestPreview(userId: number, rollId: number, idx: number,
   }
 
   const { w, h, hue, sat, light, color } = info;
-  const result = background.addFrame(userId, rollId, { id, idx, w, h, hue, sat, light, color, bytes: 0, provisional: true });
+  const result = background.addFrame(userId, rollId, { id, idx, w, h, hue, sat, light, color, bytes: 0, provisional: true, uploadId });
   if (result !== "ok") {
     await deleteRenditions(id);
     return result === "exists" ? { status: "exists" } : { status: "error", error: "roll" };
@@ -126,8 +127,9 @@ export async function finalizePhoto(
   const processed = since(processing);
 
   const saving = Date.now();
+  const ext = EXT[photo.format] ?? "img";
   try {
-    await savePhoto(userId, frameId, { original: { data: original, ext: EXT[photo.format] ?? "img" }, feed: photo.feed, full: photo.full }, { keepOnFailure: true });
+    await savePhoto(userId, frameId, { original: { data: original, ext }, feed: photo.feed, full: photo.full }, { keepOnFailure: true });
   } catch {
     log("ingest", `кадр ${frameId}: оригинал не записан на диск`);
     return { status: "error", error: "storage", removed: false };
@@ -136,6 +138,8 @@ export async function finalizePhoto(
 
   const { w, h, hue, sat, light, color } = photo;
   if (!background.finalizeFrame(userId, frameId, { w, h, hue, sat, light, color, bytes: original.length })) {
+    // кадр стёрли, пока шёл оригинал (загрузку отменили, плёнку удалили): только что записанные файлы не нужны
+    await deletePhoto(userId, frameId, ext);
     return { status: "error", error: "roll", removed: false };
   }
   return { status: "ok" };

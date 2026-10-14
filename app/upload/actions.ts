@@ -16,6 +16,7 @@ import {
 import { runImport } from "@/lib/import/runner";
 import { ImportError, listYandex, normalizeYandexUrl } from "@/lib/import/yandex";
 import { MAX_FRAMES_PER_UPLOAD, USER_QUOTA_BYTES } from "@/lib/photos/limits";
+import { startUpload } from "@/lib/uploads";
 
 // Серверные действия страницы загрузки. Кадры с компьютера принимает app/api/rolls/[id]/frames,
 // импорт по ссылке (Яндекс Диск) идёт в фоне на сервере: lib/import, состояние отдаёт app/api/imports/[id].
@@ -71,7 +72,8 @@ export interface StartUploadInput {
   totalBytes: number;
 }
 
-export type StartUploadResult = { ok: true; rollId: number; firstIdx: number } | { ok: false; error: string };
+/** uploadId: загрузка идёт целиком или никак (lib/uploads.ts); его нужно слать с каждым кадром */
+export type StartUploadResult = { ok: true; rollId: number; firstIdx: number; uploadId: string } | { ok: false; error: string };
 
 /**
  * Начало загрузки: создаёт новую плёнку (она всегда «только я») или берёт существующую и резервирует номера
@@ -91,9 +93,10 @@ export async function startUploadAction(input: StartUploadInput): Promise<StartU
 
   const firstIdx = await reserveFrameSlots(user.id, rollId, input.count);
   if (firstIdx === null) return { ok: false, error: "Такой плёнки нет" };
+  const uploadId = startUpload(user.id, rollId, input.rollId === null, input.count);
 
   revalidatePath("/", "layout");
-  return { ok: true, rollId, firstIdx };
+  return { ok: true, rollId, firstIdx, uploadId };
 }
 
 // ── импорт по ссылке ──
@@ -187,6 +190,8 @@ export async function startImportAction(input: StartImportInput): Promise<StartI
     key,
     files.map((f, n) => ({ name: f.name, path: f.path, size: f.size, idx: firstIdx + n, preview: f.preview })),
   );
+  // целиком или никак, как загрузка с устройства: ушли со страницы до конца — импорт останавливается, его кадры стираются
+  startUpload(user.id, target.rollId, input.rollId === null, files.length, importId);
   runImport(importId);
 
   revalidatePath("/", "layout");

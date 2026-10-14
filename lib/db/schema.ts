@@ -160,6 +160,21 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
     PRIMARY KEY (import_id, pos)
   );
   `,
+  /* 8: загрузка с устройства целиком или никак: ушли со страницы до конца — кадры этой загрузки стираются */ `
+  CREATE TABLE uploads (
+    id         TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    roll_id    INTEGER NOT NULL,
+    -- плёнку создала эта загрузка: при отмене стирается и она
+    new_roll   INTEGER NOT NULL,
+    -- сколько кадров обещано (startUploadAction): по нему уборщик отличает законченную загрузку от брошенной
+    expected   INTEGER NOT NULL,
+    touched_at INTEGER NOT NULL
+  );
+  -- кадр пришёл в незаконченной загрузке; когда загрузка закончена, отметка снимается
+  ALTER TABLE frames ADD COLUMN upload_id TEXT;
+  CREATE INDEX frames_upload ON frames(upload_id) WHERE upload_id IS NOT NULL;
+  `,
 ];
 
 export function migrate(db: Database.Database) {
