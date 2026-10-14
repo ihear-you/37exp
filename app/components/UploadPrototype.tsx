@@ -1156,11 +1156,13 @@ export default function UploadPrototype({
                     title={`${i.name} · ${(i.size / 1048576).toFixed(1)} МБ${i.error ? ` · ${i.error}` : ""}`}
                   >
                     {i.url ? (
+                      // миниатюры с Диска Яндекс отдаёт только без Referer чужого сайта (иначе 403), поэтому не отправляем его
                       <Image
                         src={i.url}
                         alt=""
                         fill
                         unoptimized
+                        referrerPolicy="no-referrer"
                         sizes="120px"
                         className={`object-cover transition-opacity ${i.status === "done" || i.shown || !started ? "opacity-100" : "opacity-60"}`}
                       />
