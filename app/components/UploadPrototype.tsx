@@ -78,6 +78,12 @@ const NEW = "__new__";
 const PARALLEL = 3;
 const now = new Date();
 
+// Журнал загрузки в консоли браузера (DevTools → Console, строки «[загрузка]»): когда что отправлено,
+// сколько шло по сети, сколько ждали ответа сервера. Серверная половина — в журнале службы (lib/log.ts)
+const log = (...args: unknown[]) => console.info("%c[загрузка]", "color:#c2572e;font-weight:bold", ...args);
+const mb = (bytes: number) => `${(bytes / 1048576).toFixed(1)} МБ`;
+const rate = (bytes: number, ms: number) => `${((bytes / 1048576) * (1000 / Math.max(ms, 1))).toFixed(2)} МБ/с`;
+
 export default function UploadPrototype({
   rolls,
   cameras: savedCameras,
@@ -142,6 +148,9 @@ export default function UploadPrototype({
   const urls = useRef<string[]>([]);
   const session = useRef<number | null>(null);
   const inflight = useRef(new Set<number>());
+  /** для журнала: когда нажали «Загрузить» и что было у файлов импорта при прошлом опросе */
+  const startedAt = useRef(0);
+  const seen = useRef(new Map<string, string>());
 
   // добавленное только что и пришедшее с сервера после обновления страницы не должно двоиться
   const allFilms = useMemo(
@@ -186,6 +195,9 @@ export default function UploadPrototype({
       patch(p);
     };
     patch({ status: "uploading", progress: 0, error: undefined });
+    const t0 = performance.now();
+    let sentAt = 0;
+    log(`→ №${item.idx} «${item.name}» ${mb(item.size)}: отправка`);
 
     const body = new FormData();
     body.append("file", item.file!);
@@ -196,7 +208,19 @@ export default function UploadPrototype({
       if (e.lengthComputable)
         patch({ progress: Math.min(99, (e.loaded / e.total) * 100) });
     };
+    // файл ушёл целиком: дальше ждём, пока сервер его обработает
+    xhr.upload.onload = () => {
+      sentAt = performance.now();
+      const ms = Math.round(sentAt - t0);
+      log(`  №${item.idx}: передан за ${ms} мс (${rate(item.size, ms)}), ждём сервер`);
+    };
     xhr.onload = () => {
+      const total = Math.round(performance.now() - t0);
+      const server = sentAt ? Math.round(performance.now() - sentAt) : null;
+      log(
+        `← №${item.idx}: ответ ${xhr.status} за ${total} мс${server !== null ? ` (из них ждали сервер ${server} мс)` : ""}`,
+        xhr.status === 200 ? "" : xhr.responseText,
+      );
       if (xhr.status === 200) return finish({ status: "done", progress: 100 });
       let code = "";
       try {
@@ -210,8 +234,10 @@ export default function UploadPrototype({
         error: ERRORS[code] ?? `Ошибка сервера (${xhr.status})`,
       });
     };
-    xhr.onerror = () =>
+    xhr.onerror = () => {
+      log(`✕ №${item.idx}: обрыв связи через ${Math.round(performance.now() - t0)} мс${sentAt ? " (файл уже был передан)" : ""}`);
       finish({ status: "error", progress: 0, error: "Нет связи с сервером" });
+    };
     xhr.send(body);
   }, []);
 
@@ -315,8 +341,13 @@ export default function UploadPrototype({
     if (!url || linkBusy) return;
     setLinkBusy(true);
     setLinkError(null);
+    const t0 = performance.now();
     const res = await previewImportAction(url);
     setLinkBusy(false);
+    log(
+      `поиск по ссылке за ${Math.round(performance.now() - t0)} мс:`,
+      res.ok ? `${res.files.length} кадров, ${mb(res.files.reduce((s, f) => s + f.size, 0))}` : res.error,
+    );
     if (!res.ok) {
       setLinkError(res.error);
       return;
@@ -355,6 +386,16 @@ export default function UploadPrototype({
           }[];
         };
         if (stopped) return;
+        const changed = data.items.filter((i) => seen.current.get(i.name) !== i.status);
+        if (changed.length) {
+          const count = (s: string) => data.items.filter((i) => i.status === s).length;
+          log(
+            `импорт: в плёнке ${data.items.filter((i) => i.shown).length}, оригиналов ${count("done")}, качается ${count("working")}, ошибок ${count("error")} из ${data.items.length}`,
+            changed.map((i) => `${i.name}: ${seen.current.get(i.name) ?? "—"} → ${i.status}${i.error ? ` (${i.error})` : ""}`),
+          );
+          changed.forEach((i) => seen.current.set(i.name, i.status));
+        }
+        if (data.finished) log(`импорт закончен за ${Math.round((performance.now() - startedAt.current) / 1000)} с`);
         // миниатюры пришли при поиске по ссылке: сохраняем их за теми же файлами
         setItems((prev) =>
           data.items.map((i, n) => ({
@@ -492,6 +533,11 @@ export default function UploadPrototype({
     if (problems.length || starting) return;
     setStarting(true);
     setStartError(null);
+    startedAt.current = performance.now();
+    seen.current.clear();
+    log(
+      `старт: ${items.length} кадров, ${mb(items.reduce((s, i) => s + i.size, 0))}, ${link ? "по ссылке с Диска" : "с устройства"}, ${mode === "new" ? "новая плёнка" : `в плёнку ${rollId}`}`,
+    );
     // камер ещё нет: создаём ту, название которой ввели в поле
     let useCameraId = cameraId;
     if (mode === "new" && !useCameraId) {
@@ -525,6 +571,7 @@ export default function UploadPrototype({
     if (link) {
       const res = await startImportAction({ url: link.url, ...target });
       setStarting(false);
+      log(`импорт запущен за ${Math.round(performance.now() - startedAt.current)} мс:`, res.ok ? `задание ${res.importId}, плёнка ${res.rollId}` : res.error);
       if (!res.ok) {
         setStartError(res.error);
         return;
@@ -540,6 +587,10 @@ export default function UploadPrototype({
       totalBytes: items.reduce((sum, i) => sum + i.size, 0),
     });
     setStarting(false);
+    log(
+      `плёнка готова к приёму за ${Math.round(performance.now() - startedAt.current)} мс:`,
+      res.ok ? `плёнка ${res.rollId}, номера с ${res.firstIdx}, отправляем по ${PARALLEL}` : res.error,
+    );
     if (!res.ok) {
       setStartError(res.error);
       return;
@@ -560,14 +611,19 @@ export default function UploadPrototype({
   // у импорта по ссылке повторяет сервер, и сразу все сбойные файлы
   const retryImport = async () => {
     if (!importId) return;
+    log("импорт: повтор сбойных файлов");
     requeue((i) => i.status === "error");
     await retryImportAction(importId);
     setPollKick((k) => k + 1);
   };
-  const retry = (id: number) =>
-    importId ? void retryImport() : requeue((i) => i.id === id);
-  const retryAll = () =>
-    importId ? void retryImport() : requeue((i) => i.status === "error");
+  const retry = (id: number) => {
+    log(`повтор кадра ${items.find((i) => i.id === id)?.name ?? id}`);
+    return importId ? void retryImport() : requeue((i) => i.id === id);
+  };
+  const retryAll = () => {
+    log("повтор всех сбойных кадров");
+    return importId ? void retryImport() : requeue((i) => i.status === "error");
+  };
   const reset = () => {
     urls.current.forEach((u) => URL.revokeObjectURL(u));
     urls.current = [];
@@ -599,7 +655,14 @@ export default function UploadPrototype({
 
   // после загрузки обновляем списки (новая плёнка попадёт в «Добавить в существующую», в шапку и ленту)
   useEffect(() => {
-    if (finished) router.refresh();
+    if (!finished) return;
+    if (!importId) {
+      const seconds = (performance.now() - startedAt.current) / 1000;
+      log(`всё загружено: ${total} кадров, ${mb(items.reduce((s, i) => s + i.size, 0))} за ${Math.round(seconds)} с`);
+    }
+    router.refresh();
+    // итог пишем один раз, в момент окончания
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finished, router]);
 
   const actions = (

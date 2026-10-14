@@ -1,3 +1,4 @@
+import { log, mb, since, speed } from "../log";
 import { MAX_FILE_BYTES, MAX_FRAMES_PER_UPLOAD } from "../photos/limits";
 
 // Импорт кадров по публичной ссылке Яндекс Диска. Работает через открытый API публичных ресурсов:
@@ -122,6 +123,11 @@ export async function listYandex(publicKey: string, preview: "tile" | "large" = 
 
 const RETRY_DELAYS = [600, 2000]; // всего три попытки
 
+/** Сколько ждать, если Яндекс не присылает ни байта: попытка обрывается и повторяется.
+ *  Медленное, но идущее скачивание не обрывается, пока укладывается в общий предел ORIGINAL_TOTAL_MS */
+const IDLE_MS = 20_000;
+const ORIGINAL_TOTAL_MS = 10 * 60_000;
+
 /**
  * Скачивает один файл публичной папки. Размер ограничен, адреса скачивания только яндексовские.
  * Обрыв соединения и временный отказ Яндекса повторяются сами; «файл слишком большой» и
@@ -129,22 +135,31 @@ const RETRY_DELAYS = [600, 2000]; // всего три попытки
  */
 export async function downloadYandex(publicKey: string, path: string): Promise<Buffer> {
   for (let attempt = 0; ; attempt++) {
+    const start = Date.now();
     try {
-      return await downloadOnce(publicKey, path);
+      const data = await downloadOnce(publicKey, path);
+      log("import", `«${path || "файл"}»: скачано ${mb(data.length)} за ${since(start)} мс (${speed(data.length, since(start))}), попытка ${attempt + 1}`);
+      return data;
     } catch (e) {
       const final = e instanceof ImportError && (e.code === "size" || e.code === "notfound" || e.code === "link");
-      if (final || attempt >= RETRY_DELAYS.length) throw e instanceof ImportError ? e : new ImportError("download");
+      const last = final || attempt >= RETRY_DELAYS.length;
+      log("import", `«${path || "файл"}»: попытка ${attempt + 1} не удалась через ${since(start)} мс (${reason(e)})${last ? ", больше не пробуем" : ", повтор"}`);
+      if (last) throw e instanceof ImportError ? e : new ImportError("download");
       await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
     }
   }
 }
 
+const reason = (e: unknown) => (e instanceof ImportError ? e.code : e instanceof Error ? e.message || e.name : String(e));
+
 async function downloadOnce(publicKey: string, path: string): Promise<Buffer> {
   const query: Record<string, string> = { public_key: publicKey };
   if (path) query.path = path;
+  const asking = Date.now();
   const { href } = (await (await api("/download", query)).json()) as { href?: string };
   if (!href) throw new ImportError("source");
-  return fetchBytes(href, MAX_FILE_BYTES, 180_000);
+  log("import", `«${path || "файл"}»: адрес скачивания от API за ${since(asking)} мс`);
+  return fetchBytes(href, MAX_FILE_BYTES, ORIGINAL_TOTAL_MS);
 }
 
 const MAX_PREVIEW_BYTES = 5 * 1024 * 1024;
@@ -159,31 +174,54 @@ export async function fetchYandexPreview(url: string): Promise<Buffer> {
   }
 }
 
-/** Скачивает по адресу Яндекса не больше maxBytes; каждый редирект проверяется по списку доменов */
+/**
+ * Скачивает по адресу Яндекса не больше maxBytes; каждый редирект проверяется по списку доменов.
+ * Обрывается, если IDLE_MS не приходит ни байта (Яндекс принял соединение и молчит) или всё скачивание
+ * дольше timeoutMs.
+ */
 async function fetchBytes(start: string, maxBytes: number, timeoutMs: number): Promise<Buffer> {
-  let url = start;
-  for (let hop = 0; hop < 6; hop++) {
-    const target = new URL(url);
-    if (target.protocol !== "https:" || !DOWNLOAD_HOSTS.test(target.hostname.toLowerCase())) throw new ImportError("download");
-    const res = await fetch(target, { redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
-    if (res.status >= 300 && res.status < 400) {
-      const next = res.headers.get("location");
-      if (!next) throw new ImportError("download");
-      url = new URL(next, target).toString();
-      continue;
-    }
-    if (!res.ok || !res.body) throw new ImportError("download");
-    if (Number(res.headers.get("content-length") || 0) > maxBytes) throw new ImportError("size");
+  const idle = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // каждый ответ и каждый пришедший кусок откладывают обрыв ещё на IDLE_MS
+  const alive = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => idle.abort(new Error(`нет данных ${IDLE_MS / 1000} с`)), IDLE_MS);
+  };
+  const signal = AbortSignal.any([idle.signal, AbortSignal.timeout(timeoutMs)]);
 
-    // читаем по кускам, чтобы не принять больше предела, даже если размер не объявлен
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
-      total += chunk.length;
-      if (total > maxBytes) throw new ImportError("size");
-      chunks.push(chunk);
+  try {
+    let url = start;
+    for (let hop = 0; hop < 6; hop++) {
+      const target = new URL(url);
+      if (target.protocol !== "https:" || !DOWNLOAD_HOSTS.test(target.hostname.toLowerCase())) throw new ImportError("download");
+      alive();
+      const res = await fetch(target, { redirect: "manual", cache: "no-store", signal });
+      if (res.status >= 300 && res.status < 400) {
+        const next = res.headers.get("location");
+        if (!next) throw new ImportError("download");
+        url = new URL(next, target).toString();
+        continue;
+      }
+      if (!res.ok || !res.body) throw new ImportError("download");
+      if (Number(res.headers.get("content-length") || 0) > maxBytes) throw new ImportError("size");
+
+      // читаем по кускам, чтобы не принять больше предела, даже если размер не объявлен
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      alive();
+      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        alive();
+        total += chunk.length;
+        if (total > maxBytes) throw new ImportError("size");
+        chunks.push(chunk);
+      }
+      return Buffer.concat(chunks);
     }
-    return Buffer.concat(chunks);
+    throw new ImportError("download");
+  } catch (e) {
+    // обрыв по тишине: причина в signal.reason, а fetch бросает общую AbortError
+    throw idle.signal.aborted && !(e instanceof ImportError) ? idle.signal.reason : e;
+  } finally {
+    clearTimeout(timer);
   }
-  throw new ImportError("download");
 }

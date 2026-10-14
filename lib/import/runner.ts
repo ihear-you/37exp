@@ -1,5 +1,6 @@
 import { background, type ImportItem } from "../db";
 import { discardProvisional, finalizePhoto, ingestPhoto, ingestPreview } from "../photos/ingest";
+import { log, mb, since } from "../log";
 import { USER_QUOTA_BYTES } from "../photos/limits";
 import { downloadYandex, fetchYandexPreview, ImportError } from "./yandex";
 
@@ -24,8 +25,9 @@ export function runImport(id: string) {
   if (running.has(id)) return;
   running.add(id);
   void work(id)
-    .catch(() => {
+    .catch((e) => {
       // ошибка самого исполнителя: файлы останутся в очереди, задание подхватится при следующем опросе
+      log("import", `${id}: исполнитель упал: ${e instanceof Error ? e.message : String(e)}`);
     })
     .finally(() => running.delete(id));
 }
@@ -33,32 +35,49 @@ export function runImport(id: string) {
 /** После перезапуска сервера: файлы, оставшиеся «в работе», возвращаются в очередь, задание продолжается */
 export function resumeImport(id: string) {
   if (running.has(id)) return;
-  background.requeueImportItems(id, ["working"]);
+  const back = background.requeueImportItems(id, ["working"]);
+  log("import", `${id}: подхвачено заново после перезапуска, в очередь вернулось файлов: ${back}`);
   runImport(id);
 }
 
 async function work(id: string) {
   const job = background.findImport(id);
   if (!job) return;
+  const start = Date.now();
+  const left = job.items.filter((i) => i.status !== "done" && i.status !== "error");
+  log("import", `${id}: старт, плёнка ${job.rollId}, файлов ${job.items.length}, осталось ${left.length} (${mb(left.reduce((s, i) => s + i.size, 0))})`);
   await showPreviews(id, job.userId, job.rollId, job.items);
   await fetchOriginals(id, job.userId, job.rollId, job.sourceUrl);
+  const after = background.findImport(id)?.items ?? [];
+  log(
+    "import",
+    `${id}: конец за ${Math.round(since(start) / 1000)} с: готово ${after.filter((i) => i.status === "done").length}, ошибок ${after.filter((i) => i.status === "error").length} из ${after.length}`,
+  );
 }
 
 /** Шаг 1. Сбой здесь не страшен: файл остаётся в очереди и на шаге 2 придёт сразу оригиналом */
 async function showPreviews(id: string, userId: number, rollId: number, items: ImportItem[]) {
   const todo = items.filter((i) => i.status === "queued" && i.preview && !i.frameId);
+  if (!todo.length) return;
+  const start = Date.now();
+  let shown = 0;
   let at = 0;
   const worker = async () => {
     for (let item = todo[at++]; item; item = todo[at++]) {
       try {
         const result = await ingestPreview(userId, rollId, item.idx, await fetchYandexPreview(item.preview!));
-        if (result.status === "ok") background.setImportItem(id, item.pos, "preview", null, result.id);
-      } catch {
+        if (result.status === "ok") {
+          background.setImportItem(id, item.pos, "preview", null, result.id);
+          shown++;
+        }
+      } catch (e) {
         // без быстрой копии: оригинал придёт на шаге 2
+        log("import", `${id}: временная копия «${item.name}» не пришла (${e instanceof Error ? e.message : String(e)})`);
       }
     }
   };
   await Promise.all(Array.from({ length: Math.min(PREVIEWS_AT_ONCE, todo.length) }, worker));
+  log("import", `${id}: временные копии ${shown} из ${todo.length} за ${since(start)} мс`);
 }
 
 type Fetched = { data: Buffer } | { error: string };
@@ -83,8 +102,11 @@ async function fetchOriginals(id: string, userId: number, rollId: number, source
 
   for (let current = fetchNext(); current; ) {
     const { item } = current;
+    const waiting = Date.now();
     const got = await current.fetched;
+    const waited = since(waiting);
     const next = fetchNext();
+    const handling = Date.now();
 
     let error: string | null = "error" in got ? got.error : null;
     // кадр, по которому файл уже показан; null, если его нет или он стёрт
@@ -109,6 +131,10 @@ async function fetchOriginals(id: string, userId: number, rollId: number, source
       error = "storage";
     }
     background.setImportItem(id, item.pos, error ? "error" : "done", error, frameId);
+    log(
+      "import",
+      `${id}: «${item.name}» ${error ? `ошибка ${error}` : "готов"}: ждали скачивание ${waited} мс, приём ${since(handling)} мс`,
+    );
     current = next;
   }
 }

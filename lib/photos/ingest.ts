@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { background } from "../db";
 import { deletePhoto, deleteRenditions, savePhoto, saveRenditions } from "../storage";
+import { log, mb, since } from "../log";
 import { MAX_FILE_BYTES, USER_QUOTA_BYTES } from "./limits";
 import { describePhoto, processPhoto } from "./process";
 
@@ -26,23 +27,30 @@ export type IngestResult =
 const newId = () => randomBytes(6).toString("hex");
 
 export async function ingestPhoto(userId: number, rollId: number, idx: number, original: Buffer): Promise<IngestResult> {
+  const label = `плёнка ${rollId} №${idx}, ${mb(original.length)}`;
   if (original.length > MAX_FILE_BYTES) return { status: "error", error: "size" };
   if (background.usedBytes(userId) + original.length > USER_QUOTA_BYTES) return { status: "error", error: "quota" };
 
   let photo;
+  const processing = Date.now();
   try {
     photo = await processPhoto(original);
   } catch {
+    log("ingest", `${label}: не читается (${since(processing)} мс)`);
     return { status: "error", error: "format" };
   }
+  const processed = since(processing);
 
   const id = newId();
   const ext = EXT[photo.format] ?? "img";
+  const saving = Date.now();
   try {
     await savePhoto(userId, id, { original: { data: original, ext }, feed: photo.feed, full: photo.full });
   } catch {
+    log("ingest", `${label}: не записан на диск`);
     return { status: "error", error: "storage" };
   }
+  log("ingest", `${label}: обработка ${processed} мс, запись ${since(saving)} мс`);
 
   const { w, h, hue, sat, light, color } = photo;
   const result = background.addFrame(userId, rollId, { id, idx, w, h, hue, sat, light, color, bytes: original.length });
@@ -58,10 +66,12 @@ export async function ingestPhoto(userId: number, rollId: number, idx: number, o
  * просмотра), без пересжатия, поэтому это быстро. Места в лимите временный кадр не занимает.
  */
 export async function ingestPreview(userId: number, rollId: number, idx: number, preview: Buffer): Promise<IngestResult> {
+  const start = Date.now();
   let info;
   try {
     info = await describePhoto(preview);
   } catch {
+    log("ingest", `плёнка ${rollId} №${idx}: временная копия не читается`);
     return { status: "error", error: "format" };
   }
 
@@ -78,6 +88,7 @@ export async function ingestPreview(userId: number, rollId: number, idx: number,
     await deleteRenditions(id);
     return result === "exists" ? { status: "exists" } : { status: "error", error: "roll" };
   }
+  log("ingest", `плёнка ${rollId} №${idx}: временная копия ${mb(preview.length)} за ${since(start)} мс`);
   return { status: "ok", id, w, h };
 }
 
@@ -105,17 +116,23 @@ export async function finalizePhoto(
   if (background.usedBytes(userId) + original.length > USER_QUOTA_BYTES) return drop("quota");
 
   let photo;
+  const processing = Date.now();
   try {
     photo = await processPhoto(original);
   } catch {
+    log("ingest", `кадр ${frameId}: оригинал не читается`);
     return drop("format");
   }
+  const processed = since(processing);
 
+  const saving = Date.now();
   try {
     await savePhoto(userId, frameId, { original: { data: original, ext: EXT[photo.format] ?? "img" }, feed: photo.feed, full: photo.full }, { keepOnFailure: true });
   } catch {
+    log("ingest", `кадр ${frameId}: оригинал не записан на диск`);
     return { status: "error", error: "storage", removed: false };
   }
+  log("ingest", `кадр ${frameId}, оригинал ${mb(original.length)}: обработка ${processed} мс, запись ${since(saving)} мс`);
 
   const { w, h, hue, sat, light, color } = photo;
   if (!background.finalizeFrame(userId, frameId, { w, h, hue, sat, light, color, bytes: original.length })) {
