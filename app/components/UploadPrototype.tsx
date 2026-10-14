@@ -1163,6 +1163,9 @@ export default function UploadPrototype({
                         fill
                         unoptimized
                         referrerPolicy="no-referrer"
+                        // картинка не показалась (Яндекс не смог сделать миниатюру, браузер не умеет HEIC):
+                        // плитка покажет название файла, как кадр без миниатюры
+                        onError={() => setItems((prev) => prev.map((x) => (x.id === i.id ? { ...x, url: undefined } : x)))}
                         sizes="120px"
                         className={`object-cover transition-opacity ${i.status === "done" || i.shown || !started ? "opacity-100" : "opacity-60"}`}
                       />
