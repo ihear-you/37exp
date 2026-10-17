@@ -6,8 +6,12 @@ import { useEffect, useRef, useState } from "react";
 import { dismissJob, retryJob, useShownInForm, useUploadJobs, type QueueItem, type UploadJob } from "@/lib/upload-queue";
 import { CheckIcon, CloseIcon, RetryIcon } from "./icons";
 
-/** Сколько ждать между обновлениями страницы, пока приходят кадры (чтобы папка и лента наполнялись на глазах) */
-const REFRESH_EVERY_MS = 3000;
+/**
+ * Как часто обновлять страницу, пока приходят кадры (чтобы папка и лента наполнялись на глазах). Каждое обновление —
+ * запрос, который стоит в одной очереди с кусочками фото и с переходами по сайту, поэтому редко и только там,
+ * где новые кадры видны: в ленте, в списке папок и в папке, куда идёт загрузка
+ */
+const REFRESH_EVERY_MS = 10_000;
 
 /**
  * Окно загрузок в углу экрана: загрузка идёт в фоне (lib/upload-queue.ts), и из формы можно уйти на любую
@@ -19,26 +23,36 @@ export default function UploadIndicator() {
   const jobs = useUploadJobs();
   const inForm = useShownInForm();
   const router = useRouter();
+  const pathname = usePathname();
   // на странице плёнки внизу по центру плашка с её данными (RollIsland.tsx): окно встаёт над ней
-  const overIsland = /^\/rolls\/\d+/.test(usePathname());
+  const overIsland = /^\/rolls\/\d+/.test(pathname);
   // по умолчанию окно свёрнуто: развёрнутые загрузки помним, пока открыта вкладка
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
-  // пришли новые кадры или загрузка закончилась: обновляем страницу, но не чаще раза в 3 секунды
-  const doneCount = jobs.reduce((s, j) => s + j.items.filter((i) => i.status === "done" || i.shown).length + (j.finished ? 1 : 0), 0);
-  const last = useRef({ count: 0, at: 0 });
+  // Пришли новые кадры: обновляем страницу, если на ней их видно, и не чаще раза в 10 секунд.
+  // Загрузка закончилась: обновляем сразу и где угодно (заодно сбрасывается память открытых страниц, next.config.ts)
+  const doneCount = jobs.reduce((s, j) => s + j.items.filter((i) => i.status === "done" || i.shown).length, 0);
+  const finishedCount = jobs.filter((j) => j.finished).length;
+  const shows = pathname === "/" || pathname === "/rolls" || jobs.some((j) => !j.finished && pathname === `/rolls/${j.rollId}`);
+  const last = useRef({ count: 0, finished: 0, at: 0 });
   useEffect(() => {
-    if (doneCount <= last.current.count) {
-      last.current.count = doneCount;
+    if (finishedCount > last.current.finished) {
+      last.current = { count: doneCount, finished: finishedCount, at: Date.now() };
+      router.refresh();
+      return;
+    }
+    last.current.finished = finishedCount;
+    if (doneCount <= last.current.count || !shows) {
+      if (doneCount < last.current.count) last.current.count = doneCount;
       return;
     }
     const wait = Math.max(0, last.current.at + REFRESH_EVERY_MS - Date.now());
     const timer = setTimeout(() => {
-      last.current = { count: doneCount, at: Date.now() };
+      last.current = { ...last.current, count: doneCount, at: Date.now() };
       router.refresh();
     }, wait);
     return () => clearTimeout(timer);
-  }, [doneCount, router]);
+  }, [doneCount, finishedCount, shows, router]);
 
   const visible = jobs.filter((j) => j.id !== inForm);
   if (!visible.length) return null;

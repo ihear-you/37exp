@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import Feed from "./components/Feed";
-import WelcomeReel from "./components/WelcomeReel";
+import Feed from "../components/Feed";
+import WelcomeReel from "../components/WelcomeReel";
 import { configuredProviders } from "@/lib/auth/providers";
 import { getViewer } from "@/lib/auth/session";
 import { getMyFeedFrames, getMyRollViews } from "@/lib/db";
