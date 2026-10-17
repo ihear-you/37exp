@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 // Хранилище файлов кадров на диске сервера. Файлы лежат вне public/ и отдаются только через
@@ -7,6 +7,7 @@ import path from "node:path";
 //   storage/feed/<id>.jpg        облегчённая копия для ленты
 //   storage/full/<id>.jpg        крупная копия для просмотра на весь экран
 //   storage/originals/<user>/<id>.<ext>   оригинал как загружен
+//   storage/parts/<upload>/<idx>.part     файл, который ещё приходит кусочками (lib/upload-queue.ts)
 //
 // Кадры из стартового набора (seed/photos) лежат в репозитории и читаются оттуда.
 
@@ -49,6 +50,51 @@ export async function savePhoto(userId: number, id: string, files: PhotoFiles, o
     if (!options.keepOnFailure) await deletePhoto(userId, id, files.original.ext);
     throw e;
   }
+}
+
+// ── файлы, которые приходят кусочками ──
+// Браузер шлёт файл частями по 1 МБ, по две сразу, поэтому они могут прийти не по порядку: каждая пишется
+// на своё место. Повтор той же части безопасен. Когда браузер говорит «файл весь», он читается целиком.
+
+const partPath = (uploadId: string, idx: number) => path.join(ROOT, "parts", uploadId, `${idx}.part`);
+const safePart = (uploadId: string, idx: number) => SAFE_ID.test(uploadId) && Number.isInteger(idx) && idx > 0;
+
+export async function writeUploadPart(uploadId: string, idx: number, offset: number, data: Uint8Array): Promise<void> {
+  if (!safePart(uploadId, idx)) throw new Error("bad part");
+  const file = partPath(uploadId, idx);
+  await mkdir(path.dirname(file), { recursive: true });
+  // создать, если файла ещё нет, не обрезая уже записанное соседней частью; писать — в режиме r+ (в режиме
+  // дозаписи запись по смещению не работает)
+  await (await open(file, "a")).close();
+  const fd = await open(file, "r+");
+  try {
+    await fd.write(data, 0, data.length, offset);
+  } finally {
+    await fd.close();
+  }
+}
+
+/** Собранный файл или null, если его нет или размер не тот (пришли не все части) */
+export async function readUploadPart(uploadId: string, idx: number, size: number): Promise<Buffer | null> {
+  if (!safePart(uploadId, idx)) return null;
+  const file = partPath(uploadId, idx);
+  const info = await stat(file).catch(() => null);
+  if (!info || info.size !== size) return null;
+  return readFile(file);
+}
+
+export async function deleteUploadPart(uploadId: string, idx: number): Promise<void> {
+  if (safePart(uploadId, idx)) await rm(partPath(uploadId, idx), { force: true });
+}
+
+/** Стирает все недособранные файлы загрузки (она закончена или отменена) */
+export async function deleteUploadParts(uploadId: string): Promise<void> {
+  if (SAFE_ID.test(uploadId)) await rm(path.join(ROOT, "parts", uploadId), { recursive: true, force: true });
+}
+
+/** Загрузки, у которых на диске лежат недособранные файлы (для уборки) */
+export async function listUploadsWithParts(): Promise<string[]> {
+  return readdir(path.join(ROOT, "parts")).catch(() => [] as string[]);
 }
 
 /** Копии кадра без оригинала: временный кадр по уменьшенной копии от источника (оригинал придёт позже) */

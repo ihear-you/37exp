@@ -45,7 +45,7 @@ export interface UploadJob {
   finished: boolean;
 }
 
-/** Что написать, если сервер отказал (коды из app/api/rolls/[id]/frames и импорта) */
+/** Что написать, если сервер отказал (коды из app/api/uploads/[id]/parts и /frames и импорта) */
 export const UPLOAD_ERRORS: Record<string, string> = {
   auth: "Войдите заново и повторите",
   size: "Файл слишком большой",
@@ -59,15 +59,12 @@ export const UPLOAD_ERRORS: Record<string, string> = {
 };
 /** Коды ошибок, при которых повтор бессмыслен */
 const FATAL = ["format", "size", "quota"];
-const PARALLEL = 3;
 /**
  * Как часто показывать прогресс отправки. Браузер сообщает о нём десятки раз в секунду, а каждое обновление
  * хранилища React рисует срочно и при этом бросает фоновую работу — переход на другую страницу. На медленном
  * канале файл идёт по минуте, и без этой паузы переходы по сайту во время загрузки не случались вовсе
  */
 const PROGRESS_EVERY_MS = 500;
-/** Сколько висит в углу сообщение «Готово», прежде чем исчезнуть само */
-const DONE_VISIBLE_MS = 20_000;
 
 // ── журнал в консоли браузера (DevTools → Console, строки «[загрузка]»); серверная половина — lib/log.ts ──
 export const log = (...args: unknown[]) => console.info("%c[загрузка]", "color:#c2572e;font-weight:bold", ...args);
@@ -154,14 +151,14 @@ export function startImportJob(job: Omit<UploadJob, "kind" | "startedAt" | "fini
   poll(job.id);
 }
 
-/** Убрать законченную загрузку из угла. Пока её показывает открытая форма, она остаётся (форме нужны её кадры) */
+/**
+ * Убрать законченную загрузку из угла (крестик). Сама она не исчезает: в окне видно, что не загрузилось.
+ * Миниатюры файлов с устройства форма отдаёт загрузчику при старте, здесь они и освобождаются
+ */
 export function dismissJob(jobId: string) {
   const job = jobs.find((j) => j.id === jobId);
-  if (!job?.finished) return;
-  if (shownInForm === jobId) {
-    setTimeout(() => dismissJob(jobId), DONE_VISIBLE_MS);
-    return;
-  }
+  if (!job?.finished || shownInForm === jobId) return;
+  job.items.forEach((i) => i.url?.startsWith("blob:") && URL.revokeObjectURL(i.url));
   setJobs(jobs.filter((j) => j.id !== jobId));
 }
 
@@ -176,73 +173,159 @@ export function retryJob(jobId: string, itemId?: number) {
   void retryImportAction(jobId).then(() => poll(jobId));
 }
 
-// ── с устройства: оригиналы по три сразу, каждый своим запросом с прогрессом ──
+// ── с устройства: файлы кусочками по 1 МБ, в пути не больше двух кусочков на всю вкладку ──
+// Браузер шлёт к сайту всё по одному соединению. Целые файлы забивали его очередь мегабайтами, и переход
+// на другую страницу ждал за ними до 15–20 секунд на медленном канале. Кусочками в очереди не больше 2 МБ:
+// переход ждёт около секунды, а скорость та же (замер на канале 1 МБ/с). Два кусочка в пути — чтобы канал
+// не простаивал, пока сервер отвечает на один. Кусочек, который не ушёл, повторяется сам; повтор кадра
+// продолжает с недошедших кусочков. Файл собирает сервер (app/api/uploads/[id]/parts и /frames).
 
-const requests = new Map<string, XMLHttpRequest>();
+const PART_BYTES = 1024 * 1024;
+const PARTS_IN_FLIGHT = 2;
+/** Паузы перед повтором кусочка или сборки; после последней кадр помечается сбойным (кнопка «Повторить») */
+const RETRY_DELAYS = [1000, 3000, 8000];
+
+/** Как идёт файл: какие кусочки дошли и какие в пути */
+interface FileState {
+  parts: number;
+  acked: Set<number>;
+  sending: Set<number>;
+  finishing: boolean;
+  failures: number;
+  /** раньше этого времени повтор не начинать */
+  waitUntil: number;
+  startedAt: number;
+  sentAt: number;
+}
+
+const fileStates = new Map<string, FileState>();
+/** Запросы в пути (кусочки и сборка): их обрывают при закрытии вкладки */
+const controllers = new Map<string, AbortController>();
+let partsInFlight = 0;
 const key = (jobId: string, itemId: number) => `${jobId}:${itemId}`;
 
 function pump() {
-  let free = PARALLEL - requests.size;
+  const now = Date.now();
   for (const job of jobs) {
     if (job.kind !== "files" || job.finished) continue;
     for (const item of job.items) {
-      if (free <= 0) return;
-      if (item.status === "queued" && !requests.has(key(job.id, item.id))) {
-        free--;
-        send(job, item);
+      if (partsInFlight >= PARTS_IN_FLIGHT) return;
+      if (item.status !== "queued" && item.status !== "uploading") continue;
+      const k = key(job.id, item.id);
+      let st = fileStates.get(k);
+      if (item.status === "queued") {
+        // новый файл или повтор сбойного: недошедшие кусочки отправятся заново, дошедшие — нет
+        st ??= { parts: Math.max(1, Math.ceil(item.size / PART_BYTES)), acked: new Set(), sending: new Set(), finishing: false, failures: 0, waitUntil: 0, startedAt: performance.now(), sentAt: 0 };
+        st.failures = 0;
+        st.waitUntil = 0;
+        fileStates.set(k, st);
+        patchItem(job.id, item.id, { status: "uploading", error: undefined });
+        log(`→ №${item.idx} «${item.name}» ${mb(item.size)}: отправка${st.acked.size ? `, осталось кусочков ${st.parts - st.acked.size} из ${st.parts}` : ` (${st.parts} кусочков)`}`);
+      }
+      if (!st || st.waitUntil > now) continue;
+      if (st.acked.size === st.parts) {
+        if (!st.finishing) finish(job, item, st);
+        continue;
+      }
+      for (let part = 0; part < st.parts && partsInFlight < PARTS_IN_FLIGHT; part++) {
+        if (!st.acked.has(part) && !st.sending.has(part)) sendPart(job, item, st, part);
       }
     }
   }
 }
 
-function send(job: UploadJob, item: QueueItem) {
+/** Сбой кусочка или сборки: подождать и повторить, а после нескольких неудач отдать кадр на кнопку «Повторить» */
+function retryLater(job: UploadJob, item: QueueItem, st: FileState, why: string) {
+  const delay = RETRY_DELAYS[st.failures++];
+  if (delay === undefined) {
+    log(`✕ №${item.idx}: не уходит (${why}), ждёт кнопки «Повторить»`);
+    patchItem(job.id, item.id, { status: "error", error: "Нет связи с сервером" });
+    return;
+  }
+  log(`  №${item.idx}: ${why}, повтор через ${delay / 1000} с`);
+  st.waitUntil = Date.now() + delay;
+  setTimeout(pump, delay);
+}
+
+/** Сервер отказал по существу: кадр сбойный, а если повтор бессмыслен — окончательно */
+function failFile(job: UploadJob, item: QueueItem, code: string, status: number) {
   const k = key(job.id, item.id);
-  const xhr = new XMLHttpRequest();
-  requests.set(k, xhr);
-  patchItem(job.id, item.id, { status: "uploading", progress: 0, error: undefined });
-  const t0 = performance.now();
-  let sentAt = 0;
-  log(`→ №${item.idx} «${item.name}» ${mb(item.size)}: отправка`);
+  if (FATAL.includes(code)) fileStates.delete(k);
+  patchItem(job.id, item.id, { status: "error", progress: 0, error: UPLOAD_ERRORS[code] ?? `Ошибка сервера (${status})`, fatal: FATAL.includes(code) });
+  settle(job.id);
+}
 
-  const finish = (p: Partial<QueueItem>) => {
-    requests.delete(k);
-    patchItem(job.id, item.id, p);
-    settle(job.id);
-    pump();
-  };
+function sendPart(job: UploadJob, item: QueueItem, st: FileState, part: number) {
+  const from = part * PART_BYTES;
+  const to = Math.min(item.size, from + PART_BYTES);
+  const k = `${key(job.id, item.id)}:${part}`;
+  const ctrl = new AbortController();
+  controllers.set(k, ctrl);
+  st.sending.add(part);
+  partsInFlight++;
+  fetch(`/api/uploads/${job.id}/parts?idx=${item.idx}&offset=${from}&size=${item.size}`, {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: item.file!.slice(from, to),
+    signal: ctrl.signal,
+  })
+    .then(async (r) => {
+      if (r.ok) {
+        st.acked.add(part);
+        st.failures = 0;
+        setProgress(job.id, item.id, Math.min(99, (st.acked.size / st.parts) * 99));
+        return;
+      }
+      const code = ((await r.json().catch(() => ({}))) as { error?: string }).error ?? "";
+      // отменена загрузка, кончился вход, файл слишком большой: повтор не поможет
+      if (code === "upload" || code === "auth" || code === "size") return failFile(job, item, code, r.status);
+      retryLater(job, item, st, `кусочек ${part + 1} из ${st.parts}: ответ ${r.status}`);
+    })
+    .catch(() => {
+      if (!ctrl.signal.aborted) retryLater(job, item, st, `кусочек ${part + 1} из ${st.parts}: нет связи`);
+    })
+    .finally(() => {
+      st.sending.delete(part);
+      controllers.delete(k);
+      partsInFlight--;
+      pump();
+    });
+}
 
-  const body = new FormData();
-  body.append("file", item.file!);
-  body.append("idx", String(item.idx));
-  body.append("upload", job.id);
-  xhr.open("POST", `/api/rolls/${job.rollId}/frames`);
-  xhr.upload.onprogress = (e) => {
-    if (e.lengthComputable) setProgress(job.id, item.id, Math.min(99, (e.loaded / e.total) * 100));
-  };
-  // файл ушёл целиком: дальше ждём, пока сервер его обработает
-  xhr.upload.onload = () => {
-    sentAt = performance.now();
-    const ms = Math.round(sentAt - t0);
-    log(`  №${item.idx}: передан за ${ms} мс (${rate(item.size, ms)}), ждём сервер`);
-  };
-  xhr.onload = () => {
-    const total = Math.round(performance.now() - t0);
-    const server = sentAt ? Math.round(performance.now() - sentAt) : null;
-    log(`← №${item.idx}: ответ ${xhr.status} за ${total} мс${server !== null ? ` (из них ждали сервер ${server} мс)` : ""}`, xhr.status === 200 ? "" : xhr.responseText);
-    if (xhr.status === 200) return finish({ status: "done", progress: 100 });
-    let code = "";
-    try {
-      code = JSON.parse(xhr.responseText).error;
-    } catch {
-      // ответ не JSON
-    }
-    finish({ status: "error", progress: 0, error: UPLOAD_ERRORS[code] ?? `Ошибка сервера (${xhr.status})`, fatal: FATAL.includes(code) });
-  };
-  xhr.onerror = () => {
-    log(`✕ №${item.idx}: обрыв связи через ${Math.round(performance.now() - t0)} мс${sentAt ? " (файл уже был передан)" : ""}`);
-    finish({ status: "error", progress: 0, error: "Нет связи с сервером" });
-  };
-  xhr.send(body);
+/** Все кусочки дошли: сервер собирает файл и делает кадр */
+function finish(job: UploadJob, item: QueueItem, st: FileState) {
+  st.finishing = true;
+  st.sentAt = performance.now();
+  const ms = Math.round(st.sentAt - st.startedAt);
+  log(`  №${item.idx}: передан за ${ms} мс (${rate(item.size, ms)}), ждём сервер`);
+  const k = `${key(job.id, item.id)}:finish`;
+  const ctrl = new AbortController();
+  controllers.set(k, ctrl);
+  fetch(`/api/uploads/${job.id}/frames?idx=${item.idx}&size=${item.size}`, { method: "POST", signal: ctrl.signal })
+    .then(async (r) => {
+      const data = (await r.json().catch(() => ({}))) as { error?: string };
+      log(`← №${item.idx}: ответ ${r.status} за ${Math.round(performance.now() - st.startedAt)} мс (из них ждали сервер ${Math.round(performance.now() - st.sentAt)} мс)`, r.ok ? "" : data);
+      if (r.ok) {
+        fileStates.delete(key(job.id, item.id));
+        patchItem(job.id, item.id, { status: "done", progress: 100 });
+        return settle(job.id);
+      }
+      // сервер не нашёл всех кусочков (например, их стёрли): отправить файл заново
+      if (data.error === "parts") {
+        st.acked.clear();
+        return retryLater(job, item, st, "сервер собрал не все кусочки");
+      }
+      if (data.error && data.error !== "storage") return failFile(job, item, data.error, r.status);
+      retryLater(job, item, st, `сборка: ответ ${r.status}`);
+    })
+    .catch(() => {
+      if (!ctrl.signal.aborted) retryLater(job, item, st, "сборка: нет связи");
+    })
+    .finally(() => {
+      st.finishing = false;
+      controllers.delete(k);
+      pump();
+    });
 }
 
 // ── импорт с Диска: качает сервер, загрузчик раз в полторы секунды спрашивает ход ──
@@ -321,7 +404,6 @@ function settle(jobId: string) {
   void fetch(`/api/uploads/${jobId}/complete`, { method: "POST", keepalive: true })
     .then((r) => log(`загрузка ${jobId} закончена: ответ ${r.status}`))
     .catch(() => log(`загрузка ${jobId}: не удалось сообщить о конце, сервер разберётся сам`));
-  setTimeout(() => dismissJob(jobId), DONE_VISIBLE_MS);
 }
 
 // ── закрытие вкладки до конца: переспросить, а при согласии отменить незаконченное ──
@@ -339,8 +421,8 @@ function guardLeaving() {
   window.addEventListener("pagehide", () => {
     const active = jobs.filter(isActive);
     if (!active.length) return;
-    requests.forEach((xhr) => xhr.abort());
-    requests.clear();
+    controllers.forEach((c) => c.abort());
+    controllers.clear();
     // sendBeacon доходит и из закрывающейся вкладки
     for (const job of active) navigator.sendBeacon(`/api/uploads/${job.id}/abort`);
     log(`вкладку закрыли: незаконченные загрузки отменены (${active.length}), их кадры будут стёрты`);

@@ -49,8 +49,9 @@ npm run dev
 ключ запоминается в cookie зрителя, по нему же открываются картинки. Хранилище — один файл `lib/storage/index.ts`
 (его можно переписать под облако). Папку можно вынести: `PLENKA_STORAGE_DIR`.
 
-Загрузка: форма `/upload` отправляет кадры по одному в `app/api/rolls/[id]/frames` (3 параллельно, прогресс и повтор
-по каждому). Камеру и плёнку можно вписать свои, они сохранятся в архиве пользователя. Лимиты (в `.env.local`):
+Загрузка: форма `/upload` запускает загрузку, а файлы отправляет загрузчик `lib/upload-queue.ts` кусочками по 1 МБ,
+по два в пути (`app/api/uploads/[id]/parts`, сборка кадра — `app/api/uploads/[id]/frames`), с прогрессом и повтором по
+каждому кадру. Камеру и плёнку можно вписать свои, они сохранятся в архиве пользователя. Лимиты (в `.env.local`):
 `MAX_FILE_MB` (по умолчанию 40) и `USER_QUOTA_GB` (по умолчанию 10 на пользователя). Регистрация открытая, поэтому
 лимит нужно держать.
 
@@ -114,7 +115,7 @@ npm run dev
 | Плёнка | `/rolls/[id]` (по доступу) | `app/rolls/[id]/page.tsx`, `app/components/RollDetail.tsx`; правка, доступ, удаление папки и кадра: `app/rolls/[id]/actions.ts` |
 | Плёнка по ссылке | `/s/[key]` | `app/s/[key]/route.ts`: запоминает ключ и ведёт на плёнку |
 | Кадр на весь экран | поверх ленты и плёнки | `app/components/Lightbox.tsx` |
-| Загрузка | `/upload` (после входа) | `app/components/UploadPrototype.tsx`, `app/upload/actions.ts`; приём кадра: `app/api/rolls/[id]/frames`, ход импорта: `app/api/imports/[id]` |
+| Загрузка | `/upload` (после входа) | `app/components/UploadPrototype.tsx`, `app/upload/actions.ts`; приём кадра: `app/api/uploads/[id]/parts` и `/frames`, ход импорта: `app/api/imports/[id]`, загрузчик и индикатор: `lib/upload-queue.ts`, `UploadIndicator.tsx` |
 | Вход и выход | `/login` | `app/login/page.tsx`, `app/api/auth/[provider]/`; меню с аватаром в шапке: `app/components/UserMenu.tsx` |
 | Картинки кадров | `/photos/f\|l/<id>.jpg` | `app/photos/[size]/[file]/route.ts`: отдаёт файл только тому, кто вправе видеть плёнку |
 

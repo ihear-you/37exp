@@ -118,7 +118,7 @@ export default function UploadPrototype({
 
   const folderInput = useRef<HTMLInputElement>(null);
   const nextId = useRef(1);
-  const urls = useRef<string[]>([]);
+  const urls = useRef(new Set<string>());
 
   // добавленное только что и пришедшее с сервера после обновления страницы не должно двоиться
   const allFilms = useMemo(
@@ -146,10 +146,15 @@ export default function UploadPrototype({
   useEffect(() => {
     folderInput.current?.setAttribute("webkitdirectory", "");
   }, []);
+  // миниатюры файлов, пока они в форме; после старта их забирает загрузчик (он же их и освободит)
   useEffect(() => {
     const list = urls.current;
     return () => list.forEach((u) => URL.revokeObjectURL(u));
   }, []);
+  const dropUrls = () => {
+    urls.current.forEach((u) => URL.revokeObjectURL(u));
+    urls.current.clear();
+  };
 
   // подсказка по названию папки: и для папки с компьютера, и для папки на Диске
   const applyFolderHint = useCallback(
@@ -189,7 +194,7 @@ export default function UploadPrototype({
         ...prev.filter((i) => i.file),
         ...images.map((f) => {
           const url = URL.createObjectURL(f);
-          urls.current.push(url);
+          urls.current.add(url);
           const id = nextId.current++;
           return {
             id,
@@ -213,8 +218,7 @@ export default function UploadPrototype({
   // кадры, найденные по ссылке, заменяют выбранные раньше
   const showListing = useCallback(
     (url: string, res: LinkListing) => {
-      urls.current.forEach((u) => URL.revokeObjectURL(u));
-      urls.current = [];
+      dropUrls();
       setItems(
         res.files.map((f, n) => ({
           id: -(n + 1),
@@ -423,6 +427,8 @@ export default function UploadPrototype({
       setStartError(res.error);
       return;
     }
+    // миниатюры теперь показывает и окно загрузки в углу: форма их больше не освобождает
+    items.forEach((i) => i.url && urls.current.delete(i.url));
     startFilesJob({
       id: res.uploadId,
       rollId: res.rollId,
@@ -435,6 +441,7 @@ export default function UploadPrototype({
   const retry = (id: number) => jobId && retryJob(jobId, id);
   const retryAll = () => jobId && retryJob(jobId);
   const reset = () => {
+    dropUrls();
     setJobId(null);
     setBroken(new Set());
     setLink(null);

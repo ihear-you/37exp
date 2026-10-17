@@ -463,6 +463,18 @@ export function abortUpload(userId: number, id: string): { frames: string[]; rol
     .immediate();
 }
 
+/** Есть ли кадр с этим номером в своей плёнке (повторный сбор файла, ответ на который потерялся) */
+export function findFrameAt(userId: number, rollId: number, idx: number): boolean {
+  return !!getDb()
+    .prepare("SELECT 1 FROM frames f JOIN rolls r ON r.id = f.roll_id WHERE r.user_id = ? AND f.roll_id = ? AND f.idx = ?")
+    .get(userId, rollId, idx);
+}
+
+/** Номера всех незаконченных загрузок (уборка недособранных файлов) */
+export function listUploadIds(): string[] {
+  return (getDb().prepare("SELECT id FROM uploads").all() as { id: string }[]).map((u) => u.id);
+}
+
 /**
  * Загрузки, от которых давно ничего не приходило: что обещано и что дошло. Импорт с Диска (задание под тем же
  * номером) форма опрашивает каждые полторы секунды, поэтому для него «давно» короче: importBefore

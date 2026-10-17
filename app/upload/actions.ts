@@ -77,7 +77,7 @@ export type StartUploadResult = { ok: true; rollId: number; firstIdx: number; up
 
 /**
  * Начало загрузки: создаёт новую плёнку (она всегда «только я») или берёт существующую и резервирует номера
- * для `count` кадров. Дальше клиент отправляет кадры по одному в /api/rolls/<номер>/frames.
+ * для `count` кадров. Дальше загрузчик (lib/upload-queue.ts) шлёт файлы кусочками в /api/uploads/<uploadId>/parts.
  */
 export async function startUploadAction(input: StartUploadInput): Promise<StartUploadResult> {
   const user = await requireUser();

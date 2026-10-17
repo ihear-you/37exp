@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { background } from "./db";
 import { log } from "./log";
-import { deletePhotos } from "./storage";
+import { deletePhotos, deleteUploadParts, listUploadsWithParts } from "./storage";
 
 // Загрузка идёт целиком или никак: и с устройства, и импорт с Яндекс Диска (у импорта номер загрузки совпадает
 // с номером задания). Пока загрузка не закончена, её кадры помечены (frames.upload_id). Форма сообщает, что всё
@@ -28,6 +28,7 @@ export async function finishUpload(userId: number, id: string): Promise<boolean>
   const temp = background.completeUpload(userId, id);
   if (temp === null) return false;
   if (temp.length) await deletePhotos(userId, temp).catch(() => {});
+  await deleteUploadParts(id).catch(() => {});
   log("upload", `загрузка ${id}: закончена${temp.length ? `, стёрто кадров без оригинала: ${temp.length}` : ""}`);
   return true;
 }
@@ -37,6 +38,7 @@ export async function abandonUpload(userId: number, id: string, why: string): Pr
   const result = background.abortUpload(userId, id);
   if (!result) return false;
   await deletePhotos(userId, result.frames).catch(() => {});
+  await deleteUploadParts(id).catch(() => {});
   log("upload", `загрузка ${id}: отменена (${why}), стёрто кадров ${result.frames.length}${result.rollRemoved ? `, плёнка ${result.rollId} удалена` : ""}`);
   return true;
 }
@@ -48,6 +50,9 @@ async function sweep() {
     if (u.done >= u.expected && u.temp === 0) await finishUpload(u.userId, u.id);
     else await abandonUpload(u.userId, u.id, `давно нет вестей, дошло ${u.done} из ${u.expected}`);
   }
+  // недособранные файлы загрузок, которых уже нет (например, сервер перезапустили посреди отмены)
+  const alive = new Set(background.listUploadIds());
+  for (const id of await listUploadsWithParts()) if (!alive.has(id)) await deleteUploadParts(id).catch(() => {});
 }
 
 const g = globalThis as typeof globalThis & { __plenkaUploadSweeper?: ReturnType<typeof setInterval> };

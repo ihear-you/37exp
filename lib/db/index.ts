@@ -247,6 +247,8 @@ export const background = {
   completeUpload: q.completeUpload,
   abortUpload: q.abortUpload,
   findStaleUploads: q.findStaleUploads,
+  listUploadIds: q.listUploadIds,
+  findFrameAt: q.findFrameAt,
   findImport: (id: string) => q.findImport(id, null),
   takeImportItem: q.takeImportItem,
   setImportItem: q.setImportItem,
