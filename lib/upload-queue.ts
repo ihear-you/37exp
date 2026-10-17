@@ -60,6 +60,12 @@ export const UPLOAD_ERRORS: Record<string, string> = {
 /** Коды ошибок, при которых повтор бессмыслен */
 const FATAL = ["format", "size", "quota"];
 const PARALLEL = 3;
+/**
+ * Как часто показывать прогресс отправки. Браузер сообщает о нём десятки раз в секунду, а каждое обновление
+ * хранилища React рисует срочно и при этом бросает фоновую работу — переход на другую страницу. На медленном
+ * канале файл идёт по минуте, и без этой паузы переходы по сайту во время загрузки не случались вовсе
+ */
+const PROGRESS_EVERY_MS = 500;
 /** Сколько висит в углу сообщение «Готово», прежде чем исчезнуть само */
 const DONE_VISIBLE_MS = 20_000;
 
@@ -83,6 +89,31 @@ function patchJob(jobId: string, patch: (job: UploadJob) => UploadJob) {
 }
 function patchItem(jobId: string, itemId: number, p: Partial<QueueItem>) {
   patchJob(jobId, (j) => ({ ...j, items: j.items.map((i) => (i.id === itemId ? { ...i, ...p } : i)) }));
+}
+
+// прогресс копится здесь и попадает в хранилище не чаще раза в PROGRESS_EVERY_MS
+const pendingProgress = new Map<string, Map<number, number>>();
+let progressTimer: ReturnType<typeof setTimeout> | null = null;
+
+function setProgress(jobId: string, itemId: number, progress: number) {
+  const job = pendingProgress.get(jobId) ?? new Map<number, number>();
+  job.set(itemId, progress);
+  pendingProgress.set(jobId, job);
+  progressTimer ??= setTimeout(flushProgress, PROGRESS_EVERY_MS);
+}
+
+function flushProgress() {
+  progressTimer = null;
+  if (!pendingProgress.size) return;
+  const pending = new Map(pendingProgress);
+  pendingProgress.clear();
+  setJobs(
+    jobs.map((j) => {
+      const p = pending.get(j.id);
+      // кадр, который за это время уже дошёл или упал, свой прогресс не получает
+      return p ? { ...j, items: j.items.map((i) => (p.has(i.id) && i.status === "uploading" ? { ...i, progress: p.get(i.id)! } : i)) } : j;
+    }),
+  );
 }
 
 const subscribe = (cb: () => void) => {
@@ -186,7 +217,7 @@ function send(job: UploadJob, item: QueueItem) {
   body.append("upload", job.id);
   xhr.open("POST", `/api/rolls/${job.rollId}/frames`);
   xhr.upload.onprogress = (e) => {
-    if (e.lengthComputable) patchItem(job.id, item.id, { progress: Math.min(99, (e.loaded / e.total) * 100) });
+    if (e.lengthComputable) setProgress(job.id, item.id, Math.min(99, (e.loaded / e.total) * 100));
   };
   // файл ушёл целиком: дальше ждём, пока сервер его обработает
   xhr.upload.onload = () => {
