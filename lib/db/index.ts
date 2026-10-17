@@ -242,8 +242,6 @@ export const background = {
   addFrame: q.insertFrame,
   finalizeFrame: q.finalizeFrame,
   removeProvisionalFrame: q.removeProvisionalFrame,
-  findOwnFrameAt: q.findOwnFrameAt,
-  findOwnFrame: q.findOwnFrame,
   touchUpload: q.touchUpload,
   insertUpload: q.insertUpload,
   completeUpload: q.completeUpload,

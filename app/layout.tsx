@@ -3,6 +3,7 @@ import { Anton, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 import SiteHeader from "./components/SiteHeader";
 import BottomBarNav from "./components/BottomBarNav";
+import UploadIndicator from "./components/UploadIndicator";
 import { getViewer } from "@/lib/auth/session";
 import { getMyCounts } from "@/lib/db";
 
@@ -46,6 +47,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         />
         <main className="flex-1">{children}</main>
         <BottomBarNav hasFrames={hasFrames} rollCount={counts.rolls} />
+        {/* ход фоновых загрузок: из формы можно уйти, загрузка продолжится (lib/upload-queue.ts) */}
+        <UploadIndicator />
       </body>
     </html>
   );

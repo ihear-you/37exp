@@ -402,28 +402,6 @@ export function finalizeFrame(userId: number, frameId: string, f: Omit<NewFrame,
   );
 }
 
-/** Свой кадр по номеру в плёнке (повторная отправка копии после обрыва связи). null, если его нет или плёнка чужая */
-export function findOwnFrameAt(userId: number, rollId: number, idx: number): { id: string; provisional: boolean } | null {
-  const row = getDb()
-    .prepare(
-      `SELECT f.id, f.provisional FROM frames f JOIN rolls r ON r.id = f.roll_id
-       WHERE r.user_id = ? AND f.roll_id = ? AND f.idx = ? AND f.deleted_at IS NULL`,
-    )
-    .get(userId, rollId, idx) as { id: string; provisional: number } | undefined;
-  return row ? { id: row.id, provisional: row.provisional === 1 } : null;
-}
-
-/** Свой кадр: временный ли он и в какой загрузке пришёл. null, если кадра нет, он удалён или чужой */
-export function findOwnFrame(userId: number, frameId: string): { provisional: boolean; uploadId: string | null } | null {
-  const row = getDb()
-    .prepare(
-      `SELECT f.provisional, f.upload_id AS uploadId FROM frames f JOIN rolls r ON r.id = f.roll_id
-       WHERE f.id = ? AND r.user_id = ? AND f.deleted_at IS NULL`,
-    )
-    .get(frameId, userId) as { provisional: number; uploadId: string | null } | undefined;
-  return row ? { provisional: row.provisional === 1, uploadId: row.uploadId } : null;
-}
-
 // ── загрузки с устройства (целиком или никак) ──
 
 export function insertUpload(id: string, userId: number, rollId: number, newRoll: boolean, expected: number) {

@@ -9,8 +9,5 @@ export const MAX_FILE_BYTES = Number(process.env.MAX_FILE_MB || 40) * MIB;
 /** Всего оригиналов на одного пользователя: USER_QUOTA_GB, по умолчанию 10 ГБ (по брифу около 3 ГБ в год) */
 export const USER_QUOTA_BYTES = Number(process.env.USER_QUOTA_GB || 10) * 1024 * MIB;
 
-/** Уменьшенная копия, которую браузер шлёт перед оригиналом (около 1280 px, обычно 200–400 КБ) */
-export const MAX_PREVIEW_BYTES = 3 * MIB;
-
 /** За один раз */
 export const MAX_FRAMES_PER_UPLOAD = 2000;

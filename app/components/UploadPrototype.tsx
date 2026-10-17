@@ -2,7 +2,6 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ISO_VALUES,
@@ -17,10 +16,19 @@ import { parseFolderName } from "@/lib/folder-name";
 import { createStore, useStore } from "@/lib/persist";
 import { isImageFile, takeUploadHandoff, type LinkListing } from "@/lib/upload-handoff";
 import {
+  log,
+  mb,
+  retryJob,
+  setShownInForm,
+  startFilesJob,
+  startImportJob,
+  useUploadJobs,
+  type QueueItem,
+} from "@/lib/upload-queue";
+import {
   createCameraAction,
   createFilmAction,
   previewImportAction,
-  retryImportAction,
   startImportAction,
   startUploadAction,
 } from "../upload/actions";
@@ -44,82 +52,13 @@ interface UploadRoll {
   month: number;
 }
 
-/** Что написать, если сервер отказал (коды из app/api/rolls/[id]/frames) */
-const ERRORS: Record<string, string> = {
-  auth: "Войдите заново и повторите",
-  size: "Файл слишком большой",
-  quota: "Не хватает места в вашем архиве",
-  format: "Не удалось прочитать картинку: формат не поддерживается",
-  roll: "Плёнка не найдена",
-  storage: "Сервер не смог сохранить файл",
-  form: "Сервер не принял файл",
-  download: "Не удалось скачать файл с Яндекс Диска",
-  upload: "Загрузка отменена",
-};
 
-type Status = "queued" | "uploading" | "done" | "error";
-interface Item {
-  id: number;
-  name: string;
-  size: number;
-  /** Превью: у кадров с компьютера сам файл, у кадров по ссылке миниатюра с Диска (её может не быть).
-   *  Файл есть только у кадров с компьютера: по ссылке их скачивает сервер */
-  url?: string;
-  file?: File;
-  /** Номер кадра в плёнке, резервируется при старте загрузки */
-  idx: number;
-  status: Status;
-  progress: number;
-  error?: string;
-  /** Кадр уже виден в плёнке (по уменьшенной копии), оригинал ещё в пути */
-  shown?: boolean;
-  /** С устройства: сначала уходит уменьшенная копия (preview), потом оригинал (original) */
-  stage?: "preview" | "original";
-  /** Временный кадр, созданный по копии: к нему отправляется оригинал */
-  frameId?: string;
-  /** Сервер отклонил файл окончательно (не картинка, слишком большой, нет места): повтор не поможет */
-  fatal?: boolean;
-}
-
-/** Код ошибки сервера, при котором повтор бессмыслен */
-const FATAL = ["format", "size", "quota"];
-const LEAVE_CONFIRM = "Загрузка ещё не закончена. Если уйти со страницы, кадры этой загрузки не сохранятся. Уйти?";
+/** Кадр в форме: тот же, что у загрузчика (lib/upload-queue.ts), до старта он просто выбран */
+type Item = QueueItem;
 
 const NEW = "__new__";
-const PARALLEL = 3;
 const now = new Date();
 
-// Журнал загрузки в консоли браузера (DevTools → Console, строки «[загрузка]»): когда что отправлено,
-// сколько шло по сети, сколько ждали ответа сервера. Серверная половина — в журнале службы (lib/log.ts)
-/** Длинная сторона уменьшенной копии: как у копий с Яндекс Диска */
-const PREVIEW_LONG = 1280;
-
-/**
- * Уменьшенная копия кадра, которую браузер отправляет первой: около 250 КБ вместо 5–10 МБ оригинала,
- * поэтому плёнка появляется на сайте за секунды. Поворот по EXIF браузер применяет сам.
- * null, если браузер не умеет открыть файл (HEIC в Chrome, TIFF): тогда кадр сразу уходит оригиналом.
- */
-async function makePreview(file: File): Promise<Blob | null> {
-  try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, PREVIEW_LONG / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bitmap.width * scale);
-    canvas.height = Math.round(bitmap.height * scale);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-    return await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
-  } catch {
-    return null;
-  }
-}
-
-const log = (...args: unknown[]) => console.info("%c[загрузка]", "color:#c2572e;font-weight:bold", ...args);
-const mb = (bytes: number) => `${(bytes / 1048576).toFixed(1)} МБ`;
-const rate = (bytes: number, ms: number) => `${((bytes / 1048576) * (1000 / Math.max(ms, 1))).toFixed(2)} МБ/с`;
 
 export default function UploadPrototype({
   rolls,
@@ -131,7 +70,6 @@ export default function UploadPrototype({
   films: Film[];
 }) {
   const memory = useStore(cameraStore, CAMERA_FALLBACK);
-  const router = useRouter();
 
   const [mode, setMode] = useState<"new" | "existing">("new");
   const [rollId, setRollId] = useState("");
@@ -151,14 +89,14 @@ export default function UploadPrototype({
   const [newCamera, setNewCamera] = useState("");
 
   const [items, setItems] = useState<Item[]>([]);
-  const [started, setStarted] = useState(false);
+  /** Запущенная загрузка: она живёт в загрузчике (lib/upload-queue.ts) и идёт, даже если уйти из формы */
+  const [jobId, setJobId] = useState<string | null>(null);
+  const job = useUploadJobs().find((j) => j.id === jobId);
+  const started = jobId !== null;
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  /** Куда загрузили: номер плёнки и была ли она создана сейчас (новая плёнка видна только автору) */
-  const [uploaded, setUploaded] = useState<{
-    rollId: number;
-    created: boolean;
-  } | null>(null);
+  /** Миниатюры, которые не показались (Яндекс не сделал, браузер не умеет HEIC): вместо них название файла */
+  const [broken, setBroken] = useState<ReadonlySet<number>>(new Set());
   const [tried, setTried] = useState(false);
   const [hint, setHint] = useState<{ folder: string; found: string[] } | null>(
     null,
@@ -177,22 +115,10 @@ export default function UploadPrototype({
     skipped: number;
     tooBig: number;
   } | null>(null);
-  const [importId, setImportId] = useState<string | null>(null);
-  const [pollKick, setPollKick] = useState(0);
 
   const folderInput = useRef<HTMLInputElement>(null);
   const nextId = useRef(1);
   const urls = useRef<string[]>([]);
-  const session = useRef<number | null>(null);
-  const inflight = useRef(new Set<number>());
-  /** для журнала: когда нажали «Загрузить» и что было у файлов импорта при прошлом опросе */
-  const startedAt = useRef(0);
-  /** Загрузка целиком или никак (lib/uploads.ts): номер, отправляемые запросы и идёт ли она сейчас */
-  const uploadId = useRef<string | null>(null);
-  const requests = useRef(new Map<number, XMLHttpRequest>());
-  const leaving = useRef(false);
-  const previewsLogged = useRef(false);
-  const seen = useRef(new Map<string, string>());
 
   // добавленное только что и пришедшее с сервера после обновления страницы не должно двоиться
   const allFilms = useMemo(
@@ -224,135 +150,6 @@ export default function UploadPrototype({
     const list = urls.current;
     return () => list.forEach((u) => URL.revokeObjectURL(u));
   }, []);
-
-  // ── загрузка: параллельно по три кадра, каждый отдельным запросом с прогрессом ──
-  // Кадр с устройства идёт в два шага: сначала уменьшенная копия (кадр сразу виден в плёнке),
-  // потом, когда копии ушли у всех кадров, оригинал заменяет её (app/api/frames/[id]/original)
-  const sendPreview = useCallback(async (item: Item) => {
-    const rollNo = session.current;
-    if (rollNo === null) return;
-    inflight.current.add(item.id);
-    const patch = (p: Partial<Item>) =>
-      setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...p } : i)));
-    const finish = (p: Partial<Item>) => {
-      inflight.current.delete(item.id);
-      patch(p);
-    };
-    patch({ status: "uploading", progress: 0, error: undefined });
-    const t0 = performance.now();
-
-    const preview = await makePreview(item.file!);
-    if (!preview) {
-      log(`  №${item.idx} «${item.name}»: браузер не сделал копию, пойдёт сразу оригиналом`);
-      return finish({ status: "queued", stage: "original" });
-    }
-    const made = Math.round(performance.now() - t0);
-    const body = new FormData();
-    body.append("file", preview, "preview.jpg");
-    body.append("idx", String(item.idx));
-    body.append("preview", "1");
-    if (uploadId.current) body.append("upload", uploadId.current);
-    try {
-      const res = await fetch(`/api/rolls/${rollNo}/frames`, { method: "POST", body });
-      const data = (await res.json().catch(() => ({}))) as { status?: string; id?: string; provisional?: boolean; error?: string };
-      log(`↑ №${item.idx}: копия ${mb(preview.size)} (сделана за ${made} мс), ответ ${res.status} за ${Math.round(performance.now() - t0)} мс`);
-      if (data.status === "ok" || (data.status === "exists" && data.provisional)) {
-        return finish({ status: "queued", stage: "original", frameId: data.id, shown: true });
-      }
-      // кадр уже целиком на сервере (повтор после обрыва связи)
-      if (data.status === "exists") return finish({ status: "done", progress: 100, stage: "original", shown: true });
-      if (data.error === "auth" || data.error === "upload") return finish({ status: "error", error: ERRORS[data.error] });
-      // копию не приняли: кадр пойдёт оригиналом, как раньше
-      finish({ status: "queued", stage: "original" });
-    } catch {
-      log(`✕ №${item.idx}: копия не ушла, нет связи`);
-      finish({ status: "error", error: "Нет связи с сервером" });
-    }
-  }, []);
-
-  const send = useCallback((item: Item) => {
-    const rollNo = session.current;
-    if (rollNo === null) return;
-    if (item.stage === "preview") return void sendPreview(item);
-    inflight.current.add(item.id);
-    const patch = (p: Partial<Item>) =>
-      setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...p } : i)));
-    const finish = (p: Partial<Item>) => {
-      inflight.current.delete(item.id);
-      patch(p);
-    };
-    patch({ status: "uploading", progress: 0, error: undefined });
-    const t0 = performance.now();
-    let sentAt = 0;
-    log(`→ №${item.idx} «${item.name}» ${mb(item.size)}: отправка оригинала${item.frameId ? "" : " (без копии)"}`);
-
-    const body = new FormData();
-    body.append("file", item.file!);
-    body.append("idx", String(item.idx));
-    if (uploadId.current) body.append("upload", uploadId.current);
-    const xhr = new XMLHttpRequest();
-    requests.current.set(item.id, xhr);
-    // есть временный кадр: оригинал заменяет его копию; нет: кадр создаётся сразу из оригинала
-    xhr.open("POST", item.frameId ? `/api/frames/${item.frameId}/original` : `/api/rolls/${rollNo}/frames`);
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable)
-        patch({ progress: Math.min(99, (e.loaded / e.total) * 100) });
-    };
-    // файл ушёл целиком: дальше ждём, пока сервер его обработает
-    xhr.upload.onload = () => {
-      sentAt = performance.now();
-      const ms = Math.round(sentAt - t0);
-      log(`  №${item.idx}: передан за ${ms} мс (${rate(item.size, ms)}), ждём сервер`);
-    };
-    xhr.onload = () => {
-      const total = Math.round(performance.now() - t0);
-      const server = sentAt ? Math.round(performance.now() - sentAt) : null;
-      log(
-        `← №${item.idx}: ответ ${xhr.status} за ${total} мс${server !== null ? ` (из них ждали сервер ${server} мс)` : ""}`,
-        xhr.status === 200 ? "" : xhr.responseText,
-      );
-      requests.current.delete(item.id);
-      if (xhr.status === 200) return finish({ status: "done", progress: 100 });
-      let code = "";
-      try {
-        code = JSON.parse(xhr.responseText).error;
-      } catch {
-        // ответ не JSON
-      }
-      finish({
-        status: "error",
-        progress: 0,
-        error: ERRORS[code] ?? `Ошибка сервера (${xhr.status})`,
-        fatal: FATAL.includes(code),
-        // оригинал не приняли совсем: сервер стёр временный кадр, повтор пойдёт без него
-        ...(item.frameId && ["format", "size", "quota", "roll"].includes(code) ? { frameId: undefined, shown: false } : {}),
-      });
-    };
-    xhr.onerror = () => {
-      requests.current.delete(item.id);
-      log(`✕ №${item.idx}: обрыв связи через ${Math.round(performance.now() - t0)} мс${sentAt ? " (файл уже был передан)" : ""}`);
-      finish({ status: "error", progress: 0, error: "Нет связи с сервером" });
-    };
-    xhr.send(body);
-  }, [sendPreview]);
-
-  useEffect(() => {
-    if (!started || link) return;
-    // оригиналы ждут, пока копии уйдут у всех кадров (сбойные копии не держат: их повторяют вручную)
-    const previewing = items.some((i) => i.stage === "preview" && i.status !== "error");
-    if (!previewing && !previewsLogged.current) {
-      previewsLogged.current = true;
-      log(`копии отправлены за ${Math.round((performance.now() - startedAt.current) / 1000)} с, дальше оригиналы`);
-    }
-    let free = PARALLEL - inflight.current.size;
-    for (const i of items) {
-      if (free <= 0) break;
-      if (i.status === "queued" && !inflight.current.has(i.id) && (i.stage === "preview" || !previewing)) {
-        free--;
-        send(i);
-      }
-    }
-  }, [items, started, send, link]);
 
   // подсказка по названию папки: и для папки с компьютера, и для папки на Диске
   const applyFolderHint = useCallback(
@@ -403,7 +200,6 @@ export default function UploadPrototype({
             idx: 0,
             status: "queued" as const,
             progress: 0,
-            stage: "preview" as const,
           };
         }),
       ]);
@@ -468,77 +264,6 @@ export default function UploadPrototype({
     }, 0);
     return () => clearTimeout(timer);
   }, [addFiles, showListing]);
-
-  // ход импорта по ссылке: сервер качает сам, форма только спрашивает состояние
-  useEffect(() => {
-    if (!importId || !started) return;
-    let stopped = false;
-    const tick = async () => {
-      try {
-        const r = await fetch(`/api/imports/${importId}`, { cache: "no-store" });
-        if (!r.ok || stopped) return;
-        const data = (await r.json()) as {
-          finished: boolean;
-          items: {
-            name: string;
-            size: number;
-            status: "queued" | "preview" | "working" | "done" | "error";
-            error: string | null;
-            shown: boolean;
-          }[];
-        };
-        if (stopped) return;
-        const changed = data.items.filter((i) => seen.current.get(i.name) !== i.status);
-        if (changed.length) {
-          const count = (s: string) => data.items.filter((i) => i.status === s).length;
-          log(
-            `импорт: в плёнке ${data.items.filter((i) => i.shown).length}, оригиналов ${count("done")}, качается ${count("working")}, ошибок ${count("error")} из ${data.items.length}`,
-            changed.map((i) => `${i.name}: ${seen.current.get(i.name) ?? "—"} → ${i.status}${i.error ? ` (${i.error})` : ""}`),
-          );
-          changed.forEach((i) => seen.current.set(i.name, i.status));
-        }
-        if (data.finished) log(`импорт закончен за ${Math.round((performance.now() - startedAt.current) / 1000)} с`);
-        // миниатюры пришли при поиске по ссылке: сохраняем их за теми же файлами
-        setItems((prev) =>
-          data.items.map((i, n) => ({
-            id: -(n + 1),
-            name: i.name,
-            size: i.size,
-            url: prev[n]?.name === i.name ? prev[n].url : undefined,
-            idx: 0,
-            // preview: кадр уже в плёнке, ждёт оригинал; working: оригинал качается
-            status:
-              i.status === "working" || i.status === "preview"
-                ? ("uploading" as const)
-                : i.status,
-            progress:
-              i.status === "done"
-                ? 100
-                : i.status === "working"
-                  ? 75
-                  : i.status === "preview"
-                    ? 50
-                    : 0,
-            shown: i.shown,
-            error: i.error ? (ERRORS[i.error] ?? "Не удалось загрузить") : undefined,
-            fatal: !!i.error && FATAL.includes(i.error),
-          })),
-        );
-        if (data.finished) {
-          stopped = true;
-          clearInterval(timer);
-        }
-      } catch {
-        // нет связи: попробуем на следующем шаге
-      }
-    };
-    const timer = setInterval(tick, 1500);
-    void tick();
-    return () => {
-      stopped = true;
-      clearInterval(timer);
-    };
-  }, [importId, started, pollKick]);
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -636,9 +361,7 @@ export default function UploadPrototype({
     if (problems.length || starting) return;
     setStarting(true);
     setStartError(null);
-    startedAt.current = performance.now();
-    previewsLogged.current = false;
-    seen.current.clear();
+    const t0 = performance.now();
     log(
       `старт: ${items.length} кадров, ${mb(items.reduce((s, i) => s + i.size, 0))}, ${link ? "по ссылке с Диска" : "с устройства"}, ${mode === "new" ? "новая плёнка" : `в плёнку ${rollId}`}`,
     );
@@ -672,19 +395,18 @@ export default function UploadPrototype({
             }
           : null,
     };
+    const created = mode === "new";
     if (link) {
       const res = await startImportAction({ url: link.url, ...target });
       setStarting(false);
-      log(`импорт запущен за ${Math.round(performance.now() - startedAt.current)} мс:`, res.ok ? `задание ${res.importId}, плёнка ${res.rollId}` : res.error);
+      log(`импорт запущен за ${Math.round(performance.now() - t0)} мс:`, res.ok ? `задание ${res.importId}, плёнка ${res.rollId}` : res.error);
       if (!res.ok) {
         setStartError(res.error);
         return;
       }
-      setUploaded({ rollId: res.rollId, created: mode === "new" });
-      setImportId(res.importId);
       // импорт тоже целиком или никак: его загрузка под тем же номером (lib/uploads.ts)
-      uploadId.current = res.importId;
-      setStarted(true);
+      startImportJob({ id: res.importId, rollId: res.rollId, title, created, items });
+      setJobId(res.importId);
       return;
     }
     const res = await startUploadAction({
@@ -694,134 +416,57 @@ export default function UploadPrototype({
     });
     setStarting(false);
     log(
-      `плёнка готова к приёму за ${Math.round(performance.now() - startedAt.current)} мс:`,
-      res.ok ? `плёнка ${res.rollId}, номера с ${res.firstIdx}, отправляем по ${PARALLEL}` : res.error,
+      `плёнка готова к приёму за ${Math.round(performance.now() - t0)} мс:`,
+      res.ok ? `плёнка ${res.rollId}, номера с ${res.firstIdx}` : res.error,
     );
     if (!res.ok) {
       setStartError(res.error);
       return;
     }
-    session.current = res.rollId;
-    uploadId.current = res.uploadId;
-    setUploaded({ rollId: res.rollId, created: mode === "new" });
-    setItems((p) => p.map((i, n) => ({ ...i, idx: res.firstIdx + n })));
-    setStarted(true);
+    startFilesJob({
+      id: res.uploadId,
+      rollId: res.rollId,
+      title,
+      created,
+      items: items.map((i, n) => ({ ...i, idx: res.firstIdx + n })),
+    });
+    setJobId(res.uploadId);
   };
-  const requeue = (match: (i: Item) => boolean) =>
-    setItems((p) =>
-      p.map((i) =>
-        match(i)
-          ? { ...i, status: "queued", progress: 0, error: undefined }
-          : i,
-      ),
-    );
-  // у импорта по ссылке повторяет сервер, и сразу все сбойные файлы
-  const retryImport = async () => {
-    if (!importId) return;
-    log("импорт: повтор сбойных файлов");
-    requeue((i) => i.status === "error");
-    await retryImportAction(importId);
-    setPollKick((k) => k + 1);
-  };
-  const retry = (id: number) => {
-    log(`повтор кадра ${items.find((i) => i.id === id)?.name ?? id}`);
-    return importId ? void retryImport() : requeue((i) => i.id === id);
-  };
-  const retryAll = () => {
-    log("повтор всех сбойных кадров");
-    return importId ? void retryImport() : requeue((i) => i.status === "error");
-  };
+  const retry = (id: number) => jobId && retryJob(jobId, id);
+  const retryAll = () => jobId && retryJob(jobId);
   const reset = () => {
-    urls.current.forEach((u) => URL.revokeObjectURL(u));
-    urls.current = [];
-    session.current = null;
+    setJobId(null);
+    setBroken(new Set());
     setLink(null);
-    setImportId(null);
     setLinkError(null);
     setLinkUrl("");
     setItems([]);
-    setStarted(false);
-    setUploaded(null);
     setStartError(null);
     setTried(false);
     setHint(null);
   };
 
-  const done = items.filter((i) => i.status === "done").length;
-  const shown = items.filter((i) => i.shown || i.status === "done").length;
-  const failed = items.filter((i) => i.status === "error").length;
-  const total = items.length;
-  const overall = total ? items.reduce((s, i) => s + i.progress, 0) / total : 0;
-  // Загрузка закончена, когда каждый кадр дошёл или сервер отклонил его окончательно (не картинка, велик, нет места).
-  // Сбой связи или скачивания с Диска не окончательный: его повторяют
-  const finished = started && total > 0 && items.every((i) => i.status === "done" || (i.status === "error" && i.fatal));
+  // после старта показываем кадры загрузки: их состояние ведёт загрузчик
+  const view = job?.items ?? items;
+  const done = view.filter((i) => i.status === "done").length;
+  const shown = view.filter((i) => i.shown || i.status === "done").length;
+  const failed = view.filter((i) => i.status === "error").length;
+  const total = view.length;
+  const overall = total ? view.reduce((s, i) => s + i.progress, 0) / total : 0;
+  const finished = !!job?.finished;
   const locked = started && !finished;
   const errors = [
     ...new Set(
-      items.filter((i) => i.status === "error" && i.error).map((i) => i.error!),
+      view.filter((i) => i.status === "error" && i.error).map((i) => i.error!),
     ),
   ];
 
-  /** Сообщить серверу, что загрузку бросили, и остановить отправку. sendBeacon доходит и при закрытии вкладки */
-  const abandon = useCallback(() => {
-    const id = uploadId.current;
-    if (!id) return;
-    uploadId.current = null;
-    leaving.current = false;
-    requests.current.forEach((xhr) => xhr.abort());
-    requests.current.clear();
-    navigator.sendBeacon(`/api/uploads/${id}/abort`);
-    log(`ушли со страницы: загрузка ${id} отменена, её кадры будут стёрты`);
-  }, []);
-
-  // Загрузка целиком или никак, и с устройства, и с Диска: если уйти со страницы до конца, кадры этой загрузки
-  // (и плёнка, если её создала она) стираются на сервере, а импорт останавливается (app/api/uploads/[id]/abort).
-  // Перед уходом браузер переспросит: при закрытии вкладки — своим окном, при переходе по ссылке сайта — нашим
+  // эту загрузку показывает форма: индикатор в углу её не дублирует, пока форма открыта
   useEffect(() => {
-    leaving.current = locked;
-    if (!locked) return;
-    const warn = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    const confirmLink = (e: MouseEvent) => {
-      const target = (e.target as Element | null)?.closest?.("a[href], [data-leaves-page]");
-      if (!target) return;
-      if (target instanceof HTMLAnchorElement && (target.target === "_blank" || target.origin !== location.origin)) return;
-      if (window.confirm(LEAVE_CONFIRM)) return;
-      e.preventDefault();
-      e.stopPropagation();
-    };
-    window.addEventListener("beforeunload", warn);
-    window.addEventListener("pagehide", abandon);
-    document.addEventListener("click", confirmLink, true);
-    return () => {
-      window.removeEventListener("beforeunload", warn);
-      window.removeEventListener("pagehide", abandon);
-      document.removeEventListener("click", confirmLink, true);
-    };
-  }, [locked, abandon]);
-  // ушли по ссылке сайта (форма закрылась), пока загрузка шла
-  useEffect(() => () => {
-    if (leaving.current) abandon();
-  }, [abandon]);
+    setShownInForm(jobId);
+    return () => setShownInForm(null);
+  }, [jobId]);
 
-  // после загрузки обновляем списки (новая плёнка попадёт в «Добавить в существующую», в шапку и ленту)
-  useEffect(() => {
-    if (!finished) return;
-    const seconds = (performance.now() - startedAt.current) / 1000;
-    log(`всё загружено: ${done} из ${total} кадров, ${mb(items.reduce((s, i) => s + i.size, 0))} за ${Math.round(seconds)} с`);
-    // сервер снимает с кадров отметку «незаконченная загрузка»: теперь они остаются, даже если уйти
-    const id = uploadId.current;
-    uploadId.current = null;
-    if (!id) return router.refresh();
-    void fetch(`/api/uploads/${id}/complete`, { method: "POST", keepalive: true })
-      .then((r) => log(`загрузка ${id} закончена: ответ ${r.status}`))
-      .catch(() => log(`загрузка ${id}: не удалось сообщить о конце, сервер разберётся сам`))
-      .finally(() => router.refresh());
-    // итог пишем один раз, в момент окончания
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finished, router]);
 
   const actions = (
     <div className="mt-6">
@@ -834,12 +479,12 @@ export default function UploadPrototype({
           <span className="text-sm">
             Готово: {done} {done === 1 ? "кадр" : "кадров"} в «{title}».
             {failed > 0 && ` Не загружено: ${failed}, сервер их не принял.`}
-            {uploaded?.created &&
+            {job?.created &&
               " Плёнка видна только вам: доступ меняется в настройках папки."}
           </span>
-          {uploaded && (
+          {job && (
             <Link
-              href={`/rolls/${uploaded.rollId}`}
+              href={`/rolls/${job.rollId}`}
               className="text-sm text-accent underline underline-offset-4"
             >
               Открыть папку
@@ -883,6 +528,15 @@ export default function UploadPrototype({
             </button>
           )}
         </div>
+      )}
+      {locked && job && (
+        <p className="mt-3 text-sm text-ink-soft">
+          Можно уйти на другие страницы сайта: загрузка продолжится, ход виден в углу экрана. Только не закрывайте
+          вкладку до конца, иначе загрузка отменится.{" "}
+          <Link href={`/rolls/${job.rollId}`} className="text-accent underline underline-offset-4">
+            Открыть папку
+          </Link>
+        </p>
       )}
       {startError && (
         <p className="mt-3 text-sm text-accent" role="alert">
@@ -1203,8 +857,7 @@ export default function UploadPrototype({
                   {linkBusy ? "Ищем…" : "Найти кадры"}
                 </button>
                 <p className="basis-full text-center text-xs text-ink-faint">
-                  Публичная ссылка на папку или файл. Кадры скачает сам сервер,
-                  но не закрывайте страницу до конца загрузки.
+                  Публичная ссылка на папку или файл. Кадры скачает сам сервер.
                 </p>
                 {linkError && (
                   <p
@@ -1223,16 +876,10 @@ export default function UploadPrototype({
               className="mt-3 rounded-[3px] bg-paper-deep px-3 py-2 text-sm text-ink-soft"
               role="status"
             >
-              Яндекс Диск, «{link.name}»: кадров {items.length}
+              Яндекс Диск, «{link.name}»: кадров {total}
               {link.skipped > 0 && `, пропущено не картинок: ${link.skipped}`}
               {link.tooBig > 0 && `, слишком больших: ${link.tooBig}`}.
-              {importId &&
-                items.some(
-                  (i) => i.status === "queued" || i.status === "uploading",
-                ) &&
-                (shown > 0
-                  ? " Кадры уже в папке, оригиналы докачиваются. Не закрывайте страницу до конца, иначе загрузка отменится."
-                  : " Кадры скачивает сервер. Не закрывайте страницу до конца, иначе загрузка отменится.")}
+              {locked && (shown > 0 ? " Кадры уже в папке, оригиналы докачиваются." : " Кадры скачивает сервер.")}
             </p>
           )}
 
@@ -1253,13 +900,15 @@ export default function UploadPrototype({
             </p>
           )}
 
-          {items.length > 0 && (
+          {total > 0 && (
             <>
               <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
                 <p className="text-sm text-ink-soft" aria-live="polite">
                   {!started
                     ? `Кадров: ${total}`
-                    : `В папке ${shown} из ${total} · оригиналы ${done} из ${total}`}
+                    : job?.kind === "import"
+                      ? `В папке ${shown} из ${total} · оригиналы ${done} из ${total}`
+                      : `Загружено ${done} из ${total}`}
                   {failed > 0 && (
                     <span className="text-accent"> · не удалось: {failed}</span>
                   )}
@@ -1283,7 +932,7 @@ export default function UploadPrototype({
                     {errors.join("; ")}
                   </p>
                 )}
-                {failed > 0 && (
+                {view.some((i) => i.status === "error" && !i.fatal) && (
                   <button
                     type="button"
                     onClick={retryAll}
@@ -1295,13 +944,13 @@ export default function UploadPrototype({
               </div>
 
               <ul className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-2">
-                {items.map((i) => (
+                {view.map((i) => (
                   <li
                     key={i.id}
                     className="relative aspect-square overflow-hidden rounded-frame bg-paper-deep ring-1 ring-line"
                     title={`${i.name} · ${(i.size / 1048576).toFixed(1)} МБ${i.error ? ` · ${i.error}` : ""}`}
                   >
-                    {i.url ? (
+                    {i.url && !broken.has(i.id) ? (
                       // миниатюры с Диска Яндекс отдаёт только без Referer чужого сайта (иначе 403), поэтому не отправляем его
                       <Image
                         src={i.url}
@@ -1311,7 +960,7 @@ export default function UploadPrototype({
                         referrerPolicy="no-referrer"
                         // картинка не показалась (Яндекс не смог сделать миниатюру, браузер не умеет HEIC):
                         // плитка покажет название файла, как кадр без миниатюры
-                        onError={() => setItems((prev) => prev.map((x) => (x.id === i.id ? { ...x, url: undefined } : x)))}
+                        onError={() => setBroken((prev) => new Set(prev).add(i.id))}
                         sizes="120px"
                         className={`object-cover transition-opacity ${i.status === "done" || i.shown || !started ? "opacity-100" : "opacity-60"}`}
                       />
@@ -1334,7 +983,13 @@ export default function UploadPrototype({
                         <CheckIcon width={12} height={12} />
                       </span>
                     )}
-                    {i.status === "error" && (
+                    {i.status === "error" && i.fatal && (
+                      // сервер отклонил файл окончательно: повтор не поможет, только причина
+                      <span className="absolute inset-0 grid place-items-center bg-paper/85 p-1.5 text-center text-[10px] leading-tight text-accent">
+                        {i.error}
+                      </span>
+                    )}
+                    {i.status === "error" && !i.fatal && (
                       <button
                         type="button"
                         onClick={() => retry(i.id)}
