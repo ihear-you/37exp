@@ -74,6 +74,10 @@ export interface Frame {
   sat: number;
   light: number;
   color: string;
+  /** Оригинал на сервере есть и его можно скачать (/photos/o/<id>); у стартового набора и временных кадров его нет */
+  original?: boolean;
+  /** Версия картинки (растёт при повороте): попадает в адрес копий, чтобы браузер не показал старую из памяти */
+  v?: number;
 }
 
 export const UNKNOWN_FILM = "unknown";
@@ -138,8 +142,9 @@ export const formatLabel = (f: Format) => (f === "35" ? "35 мм" : "120, сре
 /** Для сортировки по дате */
 export const rollDate = (r: { year: number; month: number }) => r.year * 12 + r.month;
 
-export const feedSrc = (id: string) => `/photos/f/${id}.jpg`;
-export const fullSrc = (id: string) => `/photos/l/${id}.jpg`;
+/** v — версия картинки (Frame.v): после поворота адрес другой, и браузер берёт новую копию, а не старую из памяти */
+export const feedSrc = (id: string, v?: number) => `/photos/f/${id}.jpg${v ? `?v=${v}` : ""}`;
+export const fullSrc = (id: string, v?: number) => `/photos/l/${id}.jpg${v ? `?v=${v}` : ""}`;
 
 /** Всё, что нужно клиентским компонентам про плёнку (без лишнего) */
 export interface RollView {

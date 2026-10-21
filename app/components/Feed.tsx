@@ -1,11 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
+import { startTransition, useMemo, useOptimistic } from "react";
 import type { Frame, RollView } from "@/lib/catalog";
 import { orderFrames, pickTint } from "@/lib/feed";
 import { newSeed } from "@/lib/rand";
 import { createStore, useStore } from "@/lib/persist";
 import type { EditorialPhoto } from "@/lib/unsplash";
+import { useRouter } from "next/navigation";
+import { deleteFrameAction, rotateFrameAction } from "../rolls/[id]/actions";
 import Masonry from "./Masonry";
 import WelcomeReel from "./WelcomeReel";
 
@@ -29,9 +31,25 @@ export default function Feed({
   photos: EditorialPhoto[];
 }) {
   const visit = useStore(visitStore);
+  const router = useRouter();
+  // в ленте только свои кадры: повернуть можно любой; после поворота страница берёт новые копии
+  const rotate = async (id: string) => {
+    const result = await rotateFrameAction(id);
+    if (result.ok) router.refresh();
+    return result;
+  };
+  // удалить тоже можно прямо из ленты: кадр исчезает сразу, а если сервер не смог — возвращается
+  const [visible, removeFrame] = useOptimistic(frames, (cur, id: string) => cur.filter((f) => f.id !== id));
+  const remove = (id: string) => {
+    startTransition(async () => {
+      removeFrame(id);
+      if (!(await deleteFrameAction(id))) alert("Не удалось удалить кадр");
+    });
+  };
   const seed = visit?.seed ?? 1;
 
-  const ordered = useMemo(() => orderFrames(frames, seed, pickTint(seed)), [frames, seed]);
+  // порядок устойчив к удалению (lib/feed.ts): остальные кадры остаются на своих местах
+  const ordered = useMemo(() => orderFrames(visible, seed, pickTint(seed)), [visible, seed]);
 
   // Пустая лента — коллаж во весь экран, без отступов и общей ширины остальной ленты
   if (visit && ordered.length === 0) return <WelcomeReel photos={photos} />;
@@ -40,7 +58,7 @@ export default function Feed({
     <div className="mx-auto w-full max-w-[1600px] px-3 pb-16 md:px-5">
       <div className="pt-4 md:pt-5">
         {visit ? (
-          <Masonry frames={ordered} rolls={rolls} rhythm rollLink seed={seed} resetKey={`${seed}`} />
+          <Masonry frames={ordered} rolls={rolls} rhythm rollLink seed={seed} resetKey={`${seed}`} onRotateFrame={rotate} onDeleteFrame={remove} />
         ) : (
           <div className="h-[70vh]" aria-hidden />
         )}

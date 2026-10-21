@@ -1,4 +1,6 @@
+import { createReadStream } from "node:fs";
 import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { Readable } from "node:stream";
 import path from "node:path";
 
 // Хранилище файлов кадров на диске сервера. Файлы лежат вне public/ и отдаются только через
@@ -129,6 +131,29 @@ export async function deletePhoto(userId: number, id: string, ext: string): Prom
     rm(renditionPath("full", id), { force: true }),
     rm(renditionPath("feed", id), { force: true }),
   ]);
+}
+
+/** Оригинал кадра целиком (поворот) с расширением. null, если файла нет */
+export async function readOriginal(userId: number, id: string): Promise<{ data: Buffer; ext: string } | null> {
+  if (!SAFE_ID.test(id)) return null;
+  const dir = path.join(ROOT, "originals", String(userId));
+  const name = (await readdir(dir).catch(() => [] as string[])).find((n) => n.split(".")[0] === id);
+  const ext = name?.split(".")[1];
+  if (!name || !ext || !SAFE_EXT.test(ext)) return null;
+  return { data: await readFile(path.join(dir, name)), ext };
+}
+
+/** Оригинал кадра для скачивания: поток (не читаем в память, оригиналы бывают до 40 МБ), размер и расширение. null, если файла нет */
+export async function openOriginal(userId: number, id: string): Promise<{ stream: ReadableStream<Uint8Array>; size: number; ext: string } | null> {
+  if (!SAFE_ID.test(id)) return null;
+  const dir = path.join(ROOT, "originals", String(userId));
+  const name = (await readdir(dir).catch(() => [] as string[])).find((n) => n.split(".")[0] === id);
+  const ext = name?.split(".")[1];
+  if (!name || !ext || !SAFE_EXT.test(ext)) return null;
+  const file = path.join(dir, name);
+  const info = await stat(file).catch(() => null);
+  if (!info) return null;
+  return { stream: Readable.toWeb(createReadStream(file)) as ReadableStream<Uint8Array>, size: info.size, ext };
 }
 
 /** Копия кадра для показа или null, если файла нет */

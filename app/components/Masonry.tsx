@@ -7,7 +7,7 @@ import { feedSrc, fullSrc, type Frame, type RollView } from "@/lib/catalog";
 import { planFeed, plainItems, type FeedItem } from "@/lib/feed";
 import { layoutMasonry } from "@/lib/masonry";
 import { FolderIcon } from "./icons";
-import Lightbox from "./Lightbox";
+import Lightbox, { type RotateFrame } from "./Lightbox";
 
 interface Props {
   /** Кадры уже в нужном порядке */
@@ -20,8 +20,10 @@ interface Props {
   seed?: number;
   /** Смена значения раскладывает кадры заново и заново проигрывает их появление (режим, перемешивание) */
   resetKey?: string;
-  /** Страница папки: в лайтбоксе появляется «Удалить» для кадра */
+  /** Свои кадры (лента, своя папка): в лайтбоксе появляется «Удалить» для кадра */
   onDeleteFrame?: (id: string) => void;
+  /** Свои кадры (лента, своя папка): в лайтбоксе появляется «Повернуть» */
+  onRotateFrame?: RotateFrame;
 }
 
 const DESKTOP = 768; // от этой ширины 4 колонки, ниже 2
@@ -40,7 +42,7 @@ function useElementWidth() {
   return [ref, width] as const;
 }
 
-export default function Masonry({ frames, rolls, rhythm = false, rollLink = false, seed = 1, resetKey, onDeleteFrame }: Props) {
+export default function Masonry({ frames, rolls, rhythm = false, rollLink = false, seed = 1, resetKey, onDeleteFrame, onRotateFrame }: Props) {
   const [ref, width] = useElementWidth();
   const [open, setOpen] = useState<number | null>(null);
 
@@ -89,7 +91,7 @@ export default function Masonry({ frames, rolls, rhythm = false, rollLink = fals
                 }}
               >
                 <Image
-                  src={w > BIG_SRC ? fullSrc(frame.id) : feedSrc(frame.id)}
+                  src={w > BIG_SRC ? fullSrc(frame.id, frame.v) : feedSrc(frame.id, frame.v)}
                   alt=""
                   fill
                   unoptimized
@@ -112,7 +114,7 @@ export default function Masonry({ frames, rolls, rhythm = false, rollLink = fals
         })}
       </div>
 
-      {open !== null && <Lightbox frames={frames} rolls={rolls} index={open} onIndex={setOpen} onClose={close} onDelete={onDeleteFrame} />}
+      {open !== null && <Lightbox frames={frames} rolls={rolls} index={open} onIndex={setOpen} onClose={close} onDelete={onDeleteFrame} onRotate={onRotateFrame} />}
     </div>
   );
 }

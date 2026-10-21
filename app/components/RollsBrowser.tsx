@@ -7,7 +7,7 @@ import PhotoFan from "./PhotoFan";
 
 export interface RollCard extends RollView {
   /** Первые кадры плёнки для «контактной полоски» на карточке */
-  strip: { id: string; w: number; h: number; color: string }[];
+  strip: { id: string; w: number; h: number; color: string; v?: number }[];
 }
 
 type Sort = "new" | "old";
@@ -126,7 +126,7 @@ function RollCardView({ roll }: { roll: RollCard }) {
       href={`/rolls/${roll.id}`}
       className="group block rounded-[20px] bg-paper-light p-5 text-center shadow-[var(--card-ring)] transition-shadow hover:shadow-[var(--card-ring-hover)]"
     >
-      <PhotoFan pics={roll.strip.map((f) => ({ id: f.id, src: feedSrc(f.id), color: f.color }))} />
+      <PhotoFan pics={roll.strip.map((f) => ({ id: f.id, src: feedSrc(f.id, f.v), color: f.color }))} />
       <h2 className="mt-6 text-[15px] leading-snug group-hover:text-accent">{roll.title}</h2>
       <p className="mt-0.5 text-[13px] text-ink-soft">
         {[roll.camera, roll.iso ? `ISO ${roll.iso}` : null, roll.format === "120" ? "120" : null].filter(Boolean).join(" · ")}

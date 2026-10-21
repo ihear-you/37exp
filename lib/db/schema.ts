@@ -175,6 +175,9 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
   ALTER TABLE frames ADD COLUMN upload_id TEXT;
   CREATE INDEX frames_upload ON frames(upload_id) WHERE upload_id IS NOT NULL;
   `,
+  /* 9: кадр можно повернуть; номер версии попадает в адрес картинки, чтобы браузер не показал старую из памяти */ `
+  ALTER TABLE frames ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export function migrate(db: Database.Database) {

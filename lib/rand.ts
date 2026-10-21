@@ -20,4 +20,20 @@ export function shuffled<T>(list: readonly T[], seed: number): T[] {
   return out;
 }
 
+/**
+ * Случайный порядок, устойчивый к удалению: место каждого элемента зависит только от его ключа и зерна,
+ * поэтому если убрать один элемент, остальные не перетасовываются (у shuffled порядок зависит от длины списка)
+ */
+export function shuffledBy<T>(list: readonly T[], seed: number, key: (item: T) => string): T[] {
+  const rank = (s: string) => {
+    let h = (seed ^ 0x811c9dc5) >>> 0; // FNV-1a по ключу, затем перемешивание mulberry32
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+    return mulberry32(h)();
+  };
+  return list
+    .map((item) => ({ item, k: key(item), r: rank(key(item)) }))
+    .sort((a, b) => a.r - b.r || (a.k < b.k ? -1 : 1))
+    .map((x) => x.item);
+}
+
 export const newSeed = () => Math.floor(Math.random() * 2 ** 31);

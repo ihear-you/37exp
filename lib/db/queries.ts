@@ -47,6 +47,8 @@ interface FrameRow {
   sat: number;
   light: number;
   color: string;
+  original: number;
+  version: number;
 }
 
 const toFrame = (f: FrameRow): Frame => ({
@@ -59,9 +61,11 @@ const toFrame = (f: FrameRow): Frame => ({
   sat: f.sat,
   light: f.light,
   color: f.color,
+  original: f.original === 1,
+  v: f.version || undefined,
 });
 
-const FRAME_COLUMNS = "f.id, f.roll_id, f.idx, f.w, f.h, f.hue, f.sat, f.light, f.color";
+const FRAME_COLUMNS = "f.id, f.roll_id, f.idx, f.w, f.h, f.hue, f.sat, f.light, f.color, (f.bytes > 0 AND f.provisional = 0) AS original, f.version";
 
 const ROLL_SELECT = `
   SELECT r.id, r.user_id, r.film_id, r.camera_id, r.format, r.iso, r.year, r.month, r.title, r.description,
@@ -519,6 +523,40 @@ export interface FrameAccess {
   shareKey: string | null;
   /** Картинка временная (скоро заменится на копию с оригинала): долго кэшировать нельзя */
   provisional: boolean;
+}
+
+/** Свой кадр с оригиналом (его можно повернуть). null, если кадра нет, он чужой, удалён или оригинала нет */
+export function findOwnOriginalFrame(userId: number, frameId: string): { rollId: number; idx: number } | null {
+  const row = getDb()
+    .prepare(
+      `SELECT f.roll_id AS rollId, f.idx FROM frames f JOIN rolls r ON r.id = f.roll_id
+       WHERE f.id = ? AND r.user_id = ? AND f.deleted_at IS NULL AND f.provisional = 0 AND f.bytes > 0`,
+    )
+    .get(frameId, userId) as { rollId: number; idx: number } | undefined;
+  return row ?? null;
+}
+
+/** Кадр повёрнут: новые размеры, цвет и вес оригинала, версия на единицу больше. Новая версия или null */
+export function saveRotatedFrame(userId: number, frameId: string, f: Omit<NewFrame, "id" | "idx" | "provisional" | "uploadId">): number | null {
+  const row = getDb()
+    .prepare(
+      `UPDATE frames SET w = @w, h = @h, hue = @hue, sat = @sat, light = @light, color = @color, bytes = @bytes, version = version + 1
+       WHERE id = @frameId AND roll_id IN (SELECT id FROM rolls WHERE user_id = @userId) RETURNING version`,
+    )
+    .get({ ...f, frameId, userId }) as { version: number } | undefined;
+  return row?.version ?? null;
+}
+
+/** Кадр для скачивания оригинала: чей он, из какой плёнки и под каким номером. null, если кадра нет, он удалён или оригинала нет */
+export function findFrameOriginal(frameId: string): (FrameAccess & { rollId: number; idx: number }) | null {
+  const row = getDb()
+    .prepare(
+      `SELECT r.user_id AS ownerId, r.visibility, r.share_key AS shareKey, f.provisional, f.roll_id AS rollId, f.idx
+       FROM frames f JOIN rolls r ON r.id = f.roll_id
+       WHERE f.id = ? AND f.deleted_at IS NULL AND f.provisional = 0 AND f.bytes > 0`,
+    )
+    .get(frameId) as (Omit<FrameAccess, "provisional"> & { provisional: number; rollId: number; idx: number }) | undefined;
+  return row ? { ...row, provisional: false } : null;
 }
 
 /** Чьё это кадр и кто его может видеть. null, если кадра нет или он удалён */

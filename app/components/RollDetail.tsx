@@ -20,7 +20,7 @@ import {
   type RollEdit,
   type Visibility,
 } from "@/lib/catalog";
-import { deleteFrameAction, deleteRollAction, saveRollAction, setRollVisibilityAction } from "../rolls/[id]/actions";
+import { deleteFrameAction, deleteRollAction, rotateFrameAction, saveRollAction, setRollVisibilityAction } from "../rolls/[id]/actions";
 import { control, Select } from "./fields";
 import { LinkIcon } from "./icons";
 import Masonry from "./Masonry";
@@ -89,6 +89,12 @@ export default function RollDetail({
     if (await deleteRollAction(roll.id)) router.push("/rolls");
     else alert("Не удалось удалить папку");
   };
+  // поворот самого оригинала; после него страница берёт новые копии кадра
+  const rotateFrame = async (id: string) => {
+    const result = await rotateFrameAction(id);
+    if (result.ok) router.refresh();
+    return result;
+  };
   const deleteFrame = (id: string) => {
     startTransition(async () => {
       removeFrame(id);
@@ -150,7 +156,12 @@ export default function RollDetail({
         {current.description && <RollDescription text={current.description} />}
       </header>
 
-      <Masonry frames={visible} rolls={{ [view.id]: view }} onDeleteFrame={canEdit ? deleteFrame : undefined} />
+      <Masonry
+        frames={visible}
+        rolls={{ [view.id]: view }}
+        onDeleteFrame={canEdit ? deleteFrame : undefined}
+        onRotateFrame={canEdit ? rotateFrame : undefined}
+      />
       {!editing && <RollIsland facts={facts} />}
     </>
   );

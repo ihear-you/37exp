@@ -15,7 +15,7 @@ export default async function RollsPage() {
   const [views, previews] = await Promise.all([getMyRollViews(viewer.id), getMyRollPreviews(viewer.id, 6)]);
   const rolls: RollCard[] = views.map((r) => ({
     ...r,
-    strip: (previews[r.id] ?? []).map((f) => ({ id: f.id, w: f.w, h: f.h, color: f.color })),
+    strip: (previews[r.id] ?? []).map((f) => ({ id: f.id, w: f.w, h: f.h, color: f.color, v: f.v })),
   }));
 
   // плёнок ещё нет: вместо пустого списка с фильтрами два способа загрузить первую.

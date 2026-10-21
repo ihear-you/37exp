@@ -18,7 +18,7 @@ export default async function AuthorPage({ params }: PageProps<"/u/[handle]">) {
 
   const rolls: RollCard[] = profile.rolls.map((r) => ({
     ...r,
-    strip: (profile.previews[r.id] ?? []).map((f) => ({ id: f.id, w: f.w, h: f.h, color: f.color })),
+    strip: (profile.previews[r.id] ?? []).map((f) => ({ id: f.id, w: f.w, h: f.h, color: f.color, v: f.v })),
   }));
 
   return (

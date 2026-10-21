@@ -86,6 +86,24 @@ export function UploadIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Стрелка вниз на полку: скачать */
+export function DownloadIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 4v12M7 11l5 5 5-5M5 20h14" />
+    </svg>
+  );
+}
+
+/** Стрелка по кругу по часовой: повернуть кадр */
+export function RotateIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4 12a8 8 0 1 1 2.3 5.6M4 20v-4.5h4.5" transform="scale(-1 1) translate(-24 0)" />
+    </svg>
+  );
+}
+
 export function RetryIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props}>

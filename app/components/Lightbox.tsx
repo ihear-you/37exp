@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { MONTHS, feedSrc, fullSrc, type Frame, type RollView } from "@/lib/catalog";
-import { ChevronIcon, CloseIcon, TrashIcon } from "./icons";
+import { ChevronIcon, CloseIcon, DownloadIcon, RotateIcon, TrashIcon } from "./icons";
+
+/** Повернуть кадр на 90° по часовой (сам оригинал); error — готовый текст для показа */
+export type RotateFrame = (id: string) => Promise<{ ok: true } | { ok: false; error: string }>;
 
 interface Props {
   frames: readonly Frame[];
@@ -13,11 +16,15 @@ interface Props {
   onClose: () => void;
   /** Если задан, в верхней панели есть «Удалить» (с подтверждением) */
   onDelete?: (id: string) => void;
+  /** Если задан (свои кадры), в верхней панели есть «Повернуть» — у кадров, у которых есть оригинал */
+  onRotate?: RotateFrame;
 }
 
 /** Кадр на весь экран: стрелки, клавиши и свайп; подпись с камерой, плёнкой, ISO и ссылкой на папку */
-export default function Lightbox({ frames, rolls, index, onIndex, onClose, onDelete }: Props) {
+export default function Lightbox({ frames, rolls, index, onIndex, onClose, onDelete, onRotate }: Props) {
   const [confirming, setConfirming] = useState(false);
+  /** Поворот идёт или не удался: относится к конкретному кадру, при листании не мешает */
+  const [turn, setTurn] = useState<{ id: string; busy: boolean; error?: string } | null>(null);
   // после удаления последнего кадра списка индекс может выйти за край, пока родитель не обновился
   const frame = frames[Math.min(index, frames.length - 1)];
   const roll = frame ? rolls[frame.roll] : undefined;
@@ -52,7 +59,7 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose, onDel
   // соседние кадры подгружаются заранее
   useEffect(() => {
     for (const i of [index - 1, index + 1]) {
-      if (frames[i]) new Image().src = fullSrc(frames[i].id);
+      if (frames[i]) new Image().src = fullSrc(frames[i].id, frames[i].v);
     }
   }, [index, frames]);
 
@@ -81,6 +88,16 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose, onDel
 
   const info = `${roll.film} · ${MONTHS[roll.month - 1]} ${roll.year}`;
 
+  const turning = turn?.id === frame.id && turn.busy;
+  const turnError = turn?.id === frame.id ? turn.error : undefined;
+  const rotate = async () => {
+    if (!onRotate || turning) return;
+    const id = frame.id;
+    setTurn({ id, busy: true });
+    const result = await onRotate(id);
+    setTurn({ id, busy: false, error: result.ok ? undefined : result.error });
+  };
+
   return (
     <div
       ref={dialog}
@@ -96,6 +113,32 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose, onDel
           {index + 1} / {frames.length}
         </span>
         <div className="flex items-center gap-1">
+          {turnError && <span className="mr-1 text-sm text-accent-vivid">{turnError}</span>}
+          {/* поворот самого оригинала на 90° по часовой (lib/photos/rotate.ts); только автору и только с оригиналом */}
+          {onRotate && frame.original && (
+            <button
+              type="button"
+              onClick={rotate}
+              disabled={turning}
+              aria-label="Повернуть по часовой"
+              title="Повернуть по часовой"
+              className="grid size-10 place-items-center rounded-control text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink disabled:opacity-60"
+            >
+              <RotateIcon className={turning ? "animate-spin" : undefined} />
+            </button>
+          )}
+          {/* оригинал как загружен, байт в байт (app/photos/o); у стартового набора и недокачанных с Диска его нет */}
+          {frame.original && (
+            <a
+              href={`/photos/o/${frame.id}`}
+              download
+              aria-label="Скачать оригинал"
+              title="Скачать оригинал"
+              className="grid size-10 place-items-center rounded-control text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
+            >
+              <DownloadIcon />
+            </a>
+          )}
           {onDelete &&
             (confirming ? (
               <>
@@ -118,11 +161,12 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose, onDel
                 <TrashIcon />
               </button>
             ))}
+          {/* «Закрыть» стоит чуть отдельно от действий с кадром (8 px вместо 4): так по нему труднее промахнуться */}
           <button
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="grid size-10 place-items-center rounded-control text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
+            className="ml-1 grid size-10 place-items-center rounded-control text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
           >
             <CloseIcon />
           </button>
@@ -139,12 +183,12 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose, onDel
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           key={frame.id}
-          src={fullSrc(frame.id)}
+          src={fullSrc(frame.id, frame.v)}
           alt={`${roll.title}, кадр ${frame.idx}`}
           draggable={false}
-          className="max-h-full max-w-full select-none bg-cover"
+          className={`max-h-full max-w-full select-none bg-cover transition-opacity ${turning ? "opacity-50" : ""}`}
           style={{
-            backgroundImage: `url(${feedSrc(frame.id)})`,
+            backgroundImage: `url(${feedSrc(frame.id, frame.v)})`,
             backgroundColor: frame.color,
             boxShadow: "var(--frame-ring-light)",
             animation: "fade-in .2s ease-out",

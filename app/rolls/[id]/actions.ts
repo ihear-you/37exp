@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { VISIBILITIES, type Film, type RollEdit, type Visibility } from "@/lib/catalog";
 import { requireUser } from "@/lib/auth/session";
 import { deleteFrame, deleteRoll, getMyFilms, setRollVisibility, updateRoll } from "@/lib/db";
+import { rotatePhoto, type RotateError } from "@/lib/photos/rotate";
 
 // Серверные действия страницы плёнки. Вызываются по сети, поэтому и права, и данные проверяются заново.
 
@@ -53,6 +54,26 @@ export async function deleteRollAction(id: number): Promise<boolean> {
 }
 
 /** true, если кадр убран */
+/**
+ * Повернуть кадр на 90° по часовой (только свой, только с оригиналом). Поворачивается сам оригинал (lib/photos/rotate.ts).
+ * error — готовый текст для показа
+ */
+export async function rotateFrameAction(frameId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!user || typeof frameId !== "string") return { ok: false, error: "Войдите, чтобы поворачивать кадры" };
+  const result = await rotatePhoto(user.id, frameId);
+  if (result.status === "error") return { ok: false, error: ROTATE_ERRORS[result.error] };
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+const ROTATE_ERRORS: Record<RotateError, string> = {
+  format: "Этот формат нельзя повернуть",
+  roll: "Кадр не найден",
+  storage: "Не удалось сохранить, попробуйте ещё раз",
+  busy: "Кадр уже поворачивается",
+};
+
 export async function deleteFrameAction(frameId: string): Promise<boolean> {
   const user = await requireUser();
   if (!user || typeof frameId !== "string") return false;

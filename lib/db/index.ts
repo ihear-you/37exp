@@ -196,6 +196,11 @@ export async function getUsedBytes(userId: number): Promise<number> {
 
 // ── доступ к файлам и ссылкам ──
 
+export async function getFrameOriginal(frameId: string) {
+  await connection();
+  return q.findFrameOriginal(frameId);
+}
+
 export async function getFrameAccess(frameId: string) {
   await connection();
   return q.findFrameAccess(frameId);
@@ -249,6 +254,8 @@ export const background = {
   findStaleUploads: q.findStaleUploads,
   listUploadIds: q.listUploadIds,
   findFrameAt: q.findFrameAt,
+  findOwnOriginalFrame: q.findOwnOriginalFrame,
+  saveRotatedFrame: q.saveRotatedFrame,
   findImport: (id: string) => q.findImport(id, null),
   takeImportItem: q.takeImportItem,
   setImportItem: q.setImportItem,

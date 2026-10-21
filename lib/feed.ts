@@ -4,7 +4,10 @@
 // Выбирается один раз на загрузку страницы, вместе с seed (см. app/components/Feed.tsx).
 
 import type { Frame } from "./catalog";
-import { mulberry32, shuffled } from "./rand";
+import { mulberry32, shuffledBy } from "./rand";
+
+// Порядок не должен перетасовываться, когда кадр удалили прямо из ленты: место кадра зависит только от него
+const shuffleFrames = (frames: readonly Frame[], seed: number) => shuffledBy(frames, seed, (f) => f.id);
 
 const isColor = (f: Frame) => f.sat >= 0.12;
 const isWarm = (f: Frame) => isColor(f) && (f.hue <= 75 || f.hue >= 330);
@@ -25,10 +28,10 @@ export function pickTint(seed: number): Tint {
 
 /** Обычный случайный порядок или лёгкий уклон в тон — без потери кадров. */
 export function orderFrames(frames: readonly Frame[], seed: number, tint: Tint): Frame[] {
-  if (tint === "none") return shuffled(frames, seed);
+  if (tint === "none") return shuffleFrames(frames, seed);
   const match = tint === "warm" ? isWarm : isCold;
-  const tinted = shuffled(frames.filter(match), seed);
-  const rest = shuffled(frames.filter((f) => !match(f)), seed + 1);
+  const tinted = shuffleFrames(frames.filter(match), seed);
+  const rest = shuffleFrames(frames.filter((f) => !match(f)), seed + 1);
   const rnd = mulberry32(seed + 2);
   const out: Frame[] = [];
   let i = 0;
