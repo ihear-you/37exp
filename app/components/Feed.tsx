@@ -7,6 +7,7 @@ import { newSeed } from "@/lib/rand";
 import { createStore, useStore } from "@/lib/persist";
 import type { EditorialPhoto } from "@/lib/unsplash";
 import { useRouter } from "next/navigation";
+import { noteDeleted } from "@/lib/undo";
 import { deleteFrameAction, rotateFrameAction } from "../rolls/[id]/actions";
 import Masonry from "./Masonry";
 import WelcomeReel from "./WelcomeReel";
@@ -38,12 +39,14 @@ export default function Feed({
     if (result.ok) router.refresh();
     return result;
   };
-  // удалить тоже можно прямо из ленты: кадр исчезает сразу, а если сервер не смог — возвращается
+  // удалить тоже можно прямо из ленты: кадр исчезает сразу (если сервер не смог — возвращается),
+  // а в углу несколько секунд висит «Кадр удалён · Отменить» (lib/undo.ts)
   const [visible, removeFrame] = useOptimistic(frames, (cur, id: string) => cur.filter((f) => f.id !== id));
   const remove = (id: string) => {
     startTransition(async () => {
       removeFrame(id);
-      if (!(await deleteFrameAction(id))) alert("Не удалось удалить кадр");
+      if (await deleteFrameAction(id)) noteDeleted(id);
+      else alert("Не удалось удалить кадр");
     });
   };
   const seed = visit?.seed ?? 1;

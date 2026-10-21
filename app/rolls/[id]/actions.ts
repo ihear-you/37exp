@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { VISIBILITIES, type Film, type RollEdit, type Visibility } from "@/lib/catalog";
 import { requireUser } from "@/lib/auth/session";
-import { deleteFrame, deleteRoll, getMyFilms, setRollVisibility, updateRoll } from "@/lib/db";
+import { deleteFrame, deleteRoll, getMyFilms, restoreFrames, setRollVisibility, updateRoll } from "@/lib/db";
 import { rotatePhoto, type RotateError } from "@/lib/photos/rotate";
 
 // Серверные действия страницы плёнки. Вызываются по сети, поэтому и права, и данные проверяются заново.
@@ -80,4 +80,13 @@ export async function deleteFrameAction(frameId: string): Promise<boolean> {
   const ok = await deleteFrame(user.id, frameId);
   if (ok) revalidatePath("/", "layout");
   return ok;
+}
+
+/** «Отменить» после удаления: вернуть кадры (до 200 за раз). true, если вернулся хотя бы один */
+export async function restoreFramesAction(frameIds: string[]): Promise<boolean> {
+  const user = await requireUser();
+  if (!user || !Array.isArray(frameIds) || frameIds.length > 200 || frameIds.some((id) => typeof id !== "string")) return false;
+  const restored = await restoreFrames(user.id, frameIds);
+  if (restored) revalidatePath("/", "layout");
+  return restored > 0;
 }

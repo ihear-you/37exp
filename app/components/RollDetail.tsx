@@ -25,7 +25,7 @@ import { control, Select } from "./fields";
 import { LinkIcon } from "./icons";
 import Masonry from "./Masonry";
 import RollDescription from "./RollDescription";
-import RollIsland from "./RollIsland";
+import { noteDeleted } from "@/lib/undo";
 
 const button = "rounded-control px-3.5 py-2 text-[11px] uppercase tracking-wider transition-colors";
 
@@ -58,17 +58,21 @@ export default function RollDetail({
 
   const film = findFilm(current.filmId, films);
   const view = rollView(current, cameras, visible.length, films);
-  const title = view.title;
 
+  // Заголовок страницы — своё название папки или просто плёнка («Kodak Gold 200»), а дата съёмки и остальные
+  // данные — тихой строкой под ним (не плавающим островом: нижний правый угол занят уведомлениями).
+  // В списках, ленте и названии вкладки плёнка по-прежнему называется целиком, с датой (rollView().title).
+  const heading = current.title || view.film;
   const isoDiffers = film.iso && current.iso && film.iso !== current.iso;
-  const facts: [string, string][] = [
-    ["Камера", view.camera],
-    ["Плёнка", view.film],
-    ["ISO", current.iso ? `${current.iso}${isoDiffers ? ` (на плёнке ${film.iso})` : ""}` : "не указано"],
-    ["Формат", formatLabel(current.format)],
-    ["Начало съёмки", `${MONTHS[current.month - 1]} ${current.year}`],
-    ["Кадров", String(visible.length)],
-  ];
+  const facts = [
+    // месяц с заглавной: строка начинается с даты («Октябрь 2026»)
+    `${MONTHS[current.month - 1].replace(/^./, (c) => c.toUpperCase())} ${current.year}`,
+    view.camera,
+    !heading.includes(view.film) && view.film,
+    // ISO, совпадающий с плёнкой («Kodak Gold 200» снята на 200), уже понятен из названия
+    current.iso && (isoDiffers || !film.iso) && `ISO ${current.iso}${isoDiffers ? ` (на плёнке ${film.iso})` : ""}`,
+    formatLabel(current.format),
+  ].filter(Boolean);
 
   const save = (e: RollEdit) => {
     startTransition(async () => {
@@ -98,7 +102,9 @@ export default function RollDetail({
   const deleteFrame = (id: string) => {
     startTransition(async () => {
       removeFrame(id);
-      if (!(await deleteFrameAction(id))) alert("Не удалось удалить кадр");
+      // удаление сразу, без подтверждения; несколько секунд его можно отменить (lib/undo.ts)
+      if (await deleteFrameAction(id)) noteDeleted(id);
+      else alert("Не удалось удалить кадр");
     });
   };
 
@@ -152,7 +158,8 @@ export default function RollDetail({
           )}
         </div>
 
-        <h1 className="mt-3 text-[26px] leading-[1.2] md:text-[40px]">{title}</h1>
+        <h1 className="mt-3 text-[26px] leading-[1.2] md:text-[40px]">{heading}</h1>
+        <p className="mt-2 text-sm text-ink-soft md:text-base">{facts.join(" · ")}</p>
         {current.description && <RollDescription text={current.description} />}
       </header>
 
@@ -162,7 +169,6 @@ export default function RollDetail({
         onDeleteFrame={canEdit ? deleteFrame : undefined}
         onRotateFrame={canEdit ? rotateFrame : undefined}
       />
-      {!editing && <RollIsland facts={facts} />}
     </>
   );
 }
@@ -429,3 +435,4 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
     </div>
   );
 }
+

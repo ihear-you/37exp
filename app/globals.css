@@ -135,3 +135,9 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* плашка «Кадр удалён · Отменить» (UploadIndicator.tsx): полоска убывает, пока можно отменить */
+@keyframes undo-countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}

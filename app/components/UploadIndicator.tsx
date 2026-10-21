@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { takeUndo, useUndo, UNDO_MS } from "@/lib/undo";
 import { dismissJob, retryJob, useShownInForm, useUploadJobs, type QueueItem, type UploadJob } from "@/lib/upload-queue";
+import { restoreFramesAction } from "../rolls/[id]/actions";
 import { CheckIcon, CloseIcon, RetryIcon } from "./icons";
 
 /**
@@ -24,8 +26,6 @@ export default function UploadIndicator() {
   const inForm = useShownInForm();
   const router = useRouter();
   const pathname = usePathname();
-  // на странице плёнки внизу по центру плашка с её данными (RollIsland.tsx): окно встаёт над ней
-  const overIsland = /^\/rolls\/\d+/.test(pathname);
   // по умолчанию окно свёрнуто: развёрнутые загрузки помним, пока открыта вкладка
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
@@ -54,8 +54,9 @@ export default function UploadIndicator() {
     return () => clearTimeout(timer);
   }, [doneCount, finishedCount, shows, router]);
 
+  const undo = useUndo();
   const visible = jobs.filter((j) => j.id !== inForm);
-  if (!visible.length) return null;
+  if (!visible.length && !undo) return null;
 
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -65,13 +66,13 @@ export default function UploadIndicator() {
     });
 
   return (
-    // на телефоне над нижней панелью навигации, на широком экране в правом нижнем углу
+    // на телефоне над нижней панелью навигации, на широком экране в правом нижнем углу; поверх просмотра кадра
+    // на весь экран (z-50), чтобы «Отменить» было видно сразу после удаления из него
     <div
-      className={`fixed inset-x-3 z-40 flex flex-col gap-2 md:inset-x-auto md:right-5 md:w-96 ${
-        overIsland ? "bottom-[9.5rem] md:bottom-[6.25rem]" : "bottom-20 md:bottom-5"
-      }`}
+      className="fixed inset-x-3 bottom-20 z-[60] flex flex-col gap-2 md:inset-x-auto md:bottom-5 md:right-5 md:w-96"
       aria-live="polite"
     >
+      {undo && <UndoPlaque key={undo.at} count={undo.ids.length} onUndo={() => void restore(takeUndo(), router)} />}
       {visible.map((job) => (
         <JobPanel key={job.id} job={job} collapsed={!expanded.has(job.id)} onToggle={() => toggle(job.id)} />
       ))}
@@ -180,5 +181,29 @@ function FileRow({ item, onRetry }: { item: QueueItem; onRetry: () => void }) {
         </button>
       )}
     </li>
+  );
+}
+
+/** Вернуть удалённые кадры; страница сама обновится по ответу сервера, refresh — на всякий случай */
+async function restore(ids: string[], router: ReturnType<typeof useRouter>) {
+  if (!ids.length) return;
+  if (await restoreFramesAction(ids)) router.refresh();
+  else alert("Не удалось вернуть кадр");
+}
+
+/** «Кадр удалён · Отменить»: держится UNDO_MS (полоска внизу убывает), потом исчезает (lib/undo.ts) */
+function UndoPlaque({ count, onUndo }: { count: number; onUndo: () => void }) {
+  return (
+    <div className="relative flex items-center gap-3 overflow-hidden rounded-[16px] bg-paper-light px-4 py-3 text-sm shadow-[0_8px_24px_rgba(0,0,0,0.5)] ring-1 ring-line" role="status">
+      <p className="min-w-0 flex-1 truncate text-ink">{count > 1 ? `Удалено кадров: ${count}` : "Кадр удалён"}</p>
+      <button type="button" onClick={onUndo} className="shrink-0 text-accent-vivid transition-opacity hover:opacity-80">
+        Отменить
+      </button>
+      <span
+        className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-accent-vivid/60"
+        style={{ animation: `undo-countdown ${UNDO_MS}ms linear forwards` }}
+        aria-hidden
+      />
+    </div>
   );
 }

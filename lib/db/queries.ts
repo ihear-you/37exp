@@ -197,6 +197,15 @@ export function markFrameDeleted(userId: number, frameId: string): boolean {
   return res.changes > 0;
 }
 
+/** Вернуть удалённые кадры («Отменить» после удаления). Сколько вернулось (свои и действительно удалённые) */
+export function restoreFrames(userId: number, frameIds: readonly string[]): number {
+  const stmt = getDb().prepare(
+    `UPDATE frames SET deleted_at = NULL
+     WHERE id = ? AND deleted_at IS NOT NULL AND roll_id IN (SELECT id FROM rolls WHERE user_id = ?)`,
+  );
+  return getDb().transaction(() => frameIds.reduce((n, id) => n + stmt.run(id, userId).changes, 0))();
+}
+
 // ── пользователи и сессии ──
 
 export interface UserRecord {

@@ -164,6 +164,11 @@ export async function deleteFrame(userId: number, frameId: string): Promise<bool
   return q.markFrameDeleted(userId, frameId);
 }
 
+export async function restoreFrames(userId: number, frameIds: readonly string[]): Promise<number> {
+  await connection();
+  return q.restoreFrames(userId, frameIds);
+}
+
 export async function createFilm(userId: number, name: string, iso: number | null): Promise<Film> {
   await connection();
   return q.insertUserFilm(userId, name, iso);

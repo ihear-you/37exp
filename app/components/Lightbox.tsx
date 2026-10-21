@@ -14,7 +14,7 @@ interface Props {
   index: number;
   onIndex: (i: number) => void;
   onClose: () => void;
-  /** Если задан, в верхней панели есть «Удалить» (с подтверждением) */
+  /** Если задан, в верхней панели есть «Удалить» (сразу, без подтверждения) */
   onDelete?: (id: string) => void;
   /** Если задан (свои кадры), в верхней панели есть «Повернуть» — у кадров, у которых есть оригинал */
   onRotate?: RotateFrame;
@@ -22,7 +22,6 @@ interface Props {
 
 /** Кадр на весь экран: стрелки, клавиши и свайп; подпись с камерой, плёнкой, ISO и ссылкой на папку */
 export default function Lightbox({ frames, rolls, index, onIndex, onClose, onDelete, onRotate }: Props) {
-  const [confirming, setConfirming] = useState(false);
   /** Поворот идёт или не удался: относится к конкретному кадру, при листании не мешает */
   const [turn, setTurn] = useState<{ id: string; busy: boolean; error?: string } | null>(null);
   // после удаления последнего кадра списка индекс может выйти за край, пока родитель не обновился
@@ -65,7 +64,6 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose, onDel
 
   const remove = () => {
     if (!onDelete || !frame) return;
-    setConfirming(false);
     onDelete(frame.id);
     // на месте удалённого встаёт следующий кадр, а если он был последним, то предыдущий
     if (frames.length <= 1) onClose();
@@ -139,28 +137,18 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose, onDel
               <DownloadIcon />
             </a>
           )}
-          {onDelete &&
-            (confirming ? (
-              <>
-                <span className="mr-1 text-sm text-ink-soft">Удалить кадр?</span>
-                <button type="button" onClick={remove} className="rounded-control px-3 py-2 text-sm text-accent-vivid transition-colors hover:bg-paper-deep">
-                  Да, удалить
-                </button>
-                <button type="button" onClick={() => setConfirming(false)} className="rounded-control px-3 py-2 text-sm text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink">
-                  Отмена
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setConfirming(true)}
-                aria-label="Удалить кадр"
-                title="Удалить кадр"
-                className="grid size-10 place-items-center rounded-control text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
-              >
-                <TrashIcon />
-              </button>
-            ))}
+          {/* удаление сразу, без подтверждения */}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={remove}
+              aria-label="Удалить кадр"
+              title="Удалить кадр"
+              className="grid size-10 place-items-center rounded-control text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
+            >
+              <TrashIcon />
+            </button>
+          )}
           {/* «Закрыть» стоит чуть отдельно от действий с кадром (8 px вместо 4): так по нему труднее промахнуться */}
           <button
             type="button"
