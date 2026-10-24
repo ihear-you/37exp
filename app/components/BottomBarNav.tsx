@@ -13,11 +13,11 @@ const ITEMS = [
 
 /** Ниже md (планшет и телефон) те же кнопки, что в шапке на десктопе, — вкладками внизу
  * экрана; та же логика показа, что и в шапке (см. useShowNav в lib/nav.ts), поэтому пока
- * плёнок нет или мы на странице загрузки, бар не показывается вовсе. */
+ * плёнок нет, бар не показывается вовсе. На странице загрузки, в отличие от шапки, он остаётся. */
 export default function BottomBarNav({ hasArchive, rollCount }: { hasArchive: boolean; rollCount: number }) {
   const path = usePathname();
   const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
-  const showNav = useShowNav(hasArchive);
+  const showNav = useShowNav(hasArchive, { onUpload: true });
 
   if (!showNav) return null;
 

@@ -1,5 +1,3 @@
-import { MONTHS } from "@/lib/catalog";
-
 export const control =
   "w-full rounded-control bg-paper-light px-3 py-2 text-sm ring-1 ring-line transition-shadow focus:outline-none focus:ring-2 focus:ring-ink/50";
 
@@ -46,52 +44,4 @@ export interface PeriodValue {
   year: number;
   endMonth: number | null;
   endYear: number | null;
-}
-
-const at = (year: number, month: number) => year * 12 + month;
-
-/**
- * Начало и конец съёмки, месяц с годом. Конец по умолчанию совпадает с началом (плёнку сняли за месяц);
- * раньше начала он не бывает: сдвинули начало дальше конца — конец едет следом
- */
-export function PeriodFields({ value, onChange }: { value: PeriodValue; onChange: (v: PeriodValue) => void }) {
-  const endMonth = value.endMonth ?? value.month;
-  const endYear = value.endYear ?? value.year;
-  const thisYear = new Date().getFullYear();
-  const years = [...new Set([...Array.from({ length: 15 }, (_, i) => thisYear - i), value.year, endYear])].sort((a, b) => b - a);
-
-  const set = (month: number, year: number, eMonth: number, eYear: number) => {
-    if (at(eYear, eMonth) < at(year, month)) [eMonth, eYear] = [month, year];
-    const same = at(eYear, eMonth) === at(year, month);
-    onChange({ month, year, endMonth: same ? null : eMonth, endYear: same ? null : eYear });
-  };
-
-  const row = (label: string, m: number, y: number, put: (m: number, y: number) => void) => (
-    <Field label={label}>
-      <span className="grid grid-cols-[minmax(0,1fr)_6.5rem] gap-2">
-        <Select value={m} aria-label={`${label}: месяц`} onChange={(e) => put(Number(e.target.value), y)}>
-          {MONTHS.map((name, i) => (
-            <option key={name} value={i + 1}>
-              {name}
-            </option>
-          ))}
-        </Select>
-        <Select value={y} aria-label={`${label}: год`} onChange={(e) => put(m, Number(e.target.value))}>
-          {years.map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </Select>
-      </span>
-    </Field>
-  );
-
-  return (
-    <>
-      {/* пока конца нет, он идёт за началом */}
-      {row("Начало съёмки", value.month, value.year, (m, y) => (value.endMonth === null ? set(m, y, m, y) : set(m, y, endMonth, endYear)))}
-      {row("Конец съёмки", endMonth, endYear, (m, y) => set(value.month, value.year, m, y))}
-    </>
-  );
 }

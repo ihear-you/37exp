@@ -1,12 +1,10 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ISO_VALUES,
   UNKNOWN_FILM,
-  filmLabel,
   findFilm,
   makeTitle,
   type Camera,
@@ -17,8 +15,10 @@ import {
 import { parseFolderName } from "@/lib/folder-name";
 import { isImageFile, takeUploadHandoff, type UploadHandoff } from "@/lib/upload-handoff";
 import {
+  cancelJob,
   log,
   mb,
+  releaseFromForm,
   renameJob,
   retryJob,
   setShownInForm,
@@ -27,10 +27,11 @@ import {
   useUploadJobs,
   type QueueItem,
 } from "@/lib/upload-queue";
-import { saveRollAction } from "../rolls/[id]/actions";
-import { createCameraAction, createFilmAction, startImportAction, startUploadAction } from "../upload/actions";
-import { control, Field, PeriodFields, Select } from "./fields";
-import { CheckIcon, RetryIcon } from "./icons";
+import { deleteRollAction, saveRollAction } from "../rolls/[id]/actions";
+import { startImportAction, startUploadAction } from "../upload/actions";
+import { control, Field, type PeriodValue } from "./fields";
+import { CameraField, FilmField, PeriodPicker, filmValue, resolveFilmAndCamera, type FilmValue } from "./RollFields";
+import { CheckIcon, ChevronIcon, RetryIcon } from "./icons";
 import type { FanPic } from "./PhotoFan";
 import BackButton from "./BackButton";
 import UploadSources from "./UploadSources";
@@ -46,8 +47,6 @@ export interface UploadDefaults {
   cameraId: string;
   format: Format;
 }
-
-const NEW = "__new__";
 
 /** 1 файл, 2 файла, 5 файлов */
 const plural = (n: number, one: string, few: string, many: string) =>
@@ -67,7 +66,11 @@ function guessRoll(folder: string | null, films: Film[], defaults: UploadDefault
     title: folder ? cleanFolderName(folder) || null : null,
     filmId: g.filmId ?? UNKNOWN_FILM,
     iso: g.iso ?? null,
-    format: defaults.format,
+    // плёнка бывает только в другом формате (например, только 120) — берём его
+    format: (() => {
+      const formats = films.find((f) => f.id === g.filmId)?.formats ?? ["35" as const, "120" as const];
+      return formats.includes(defaults.format) ? defaults.format : formats[0];
+    })(),
     cameraId: defaults.cameraId,
     month: g.month ?? now.getMonth() + 1,
     year: g.year ?? now.getFullYear(),
@@ -116,9 +119,10 @@ export default function UploadFlow({
   }, []);
 
   // эту загрузку показывает страница: окно в углу её не дублирует, пока страница открыта
+  // Уходя, отдаём её окну в углу, но только если она ещё идёт или что-то не загрузилось (releaseFromForm)
   useEffect(() => {
     setShownInForm(jobId);
-    return () => setShownInForm(null);
+    return () => (jobId ? releaseFromForm(jobId) : setShownInForm(null));
   }, [jobId]);
 
   const begin = useCallback(
@@ -203,14 +207,27 @@ export default function UploadFlow({
     setPhase("pick");
   };
 
+  // Выбрали не те фото: загрузка отменяется, уже пришедшие кадры и созданная ею папка стираются, снова плитки
+  // переспрашиваем прямо на странице, а не окном браузера: confirm() в некоторых браузерах молча не показывается
+  const [confirmOthers, setConfirmOthers] = useState(false);
+  /** На телефоне и планшете сетка фото свёрнута в строку превью: главное там — карточка плёнки */
+  const [showAll, setShowAll] = useState(false);
+  const chooseOthers = async () => {
+    setConfirmOthers(false);
+    if (jobId) cancelJob(jobId);
+    if (rollId !== null) await deleteRollAction(rollId);
+    reset();
+  };
+
   if (phase === "checking") return <div className="min-h-[calc(100dvh-5rem)]" />;
-  // «Назад» только на шаге выбора и только когда архив уже есть: новому аккаунту возвращаться некуда,
+  // «Назад» (на компьютере) только на шаге выбора и только когда архив уже есть: новому аккаунту возвращаться некуда,
   // а пока идёт загрузка, выход из неё ещё не решили
   if (phase === "pick")
     return (
       <div className="relative">
+        {/* на телефоне вместо «Назад» нижний бар навигации */}
         {!first && (
-          <div className="absolute left-0 top-6 z-10">
+          <div className="absolute left-0 top-6 z-10 hidden md:block">
             <BackButton />
           </div>
         )}
@@ -232,8 +249,9 @@ export default function UploadFlow({
   const status = finished ? `Загружено фото: ${done} из ${total}` : `Загружаются фото: ${done} из ${total}`;
 
   return (
-    // на телефоне по порядку: ход загрузки, карточка, кадры; на широком экране карточка справа во всю высоту
-    <div className="grid gap-6 pb-10 pt-2 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-[auto_1fr] lg:gap-x-10 lg:gap-y-0">
+    // на телефоне по порядку: ход загрузки со строкой превью, раскрытая сетка кадров (если раскрыли), карточка;
+    // на широком экране (lg) сетка видна всегда, а карточка справа во всю высоту
+    <div className="grid gap-6 pb-28 pt-2 md:pb-10 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-[auto_1fr] lg:gap-x-10 lg:gap-y-0">
 
       {/* ── ход загрузки ── */}
       <section aria-label="Загрузка" className="min-w-0 lg:col-start-1 lg:row-start-1">
@@ -273,8 +291,32 @@ export default function UploadFlow({
                 )}
               </p>
             )}
+            {confirmOthers ? (
+              <p className="flex basis-full flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-soft" role="alert">
+                Загрузка отменится, а уже загруженные фото этой папки удалятся
+                <button type="button" onClick={() => void chooseOthers()} className="text-accent-vivid underline underline-offset-4">
+                  Выбрать другие
+                </button>
+                <button type="button" onClick={() => setConfirmOthers(false)} className="underline underline-offset-4 hover:text-ink">
+                  Отмена
+                </button>
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmOthers(true)}
+                className="basis-full text-left text-sm text-ink-soft underline underline-offset-4 hover:text-ink"
+              >
+                Выбрать другие фото
+              </button>
+            )}
           </div>
         )}
+        {!startError && view.length > 0 && <Strip items={view} expanded={showAll} onToggle={() => setShowAll((v) => !v)} />}
+      </section>
+
+      <section aria-label="Кадры" className={`min-w-0 lg:col-start-1 lg:row-start-2 lg:block ${showAll ? "" : "hidden"}`}>
+        <Thumbs items={view} started={!!job} onRetry={(id) => jobId && retryJob(jobId, id)} />
       </section>
 
       <aside className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1">
@@ -285,47 +327,44 @@ export default function UploadFlow({
               rollId={rollId}
               films={films}
               cameras={cameras}
+              finished={finished}
               onFilm={(f) => setFilms((p) => [...p, f])}
               onCamera={(c) => setCameras((p) => [...p, c])}
-              note={
-                job && (
-                  <p className="text-sm text-ink-soft">
-                    {finished ? (
-                      <>
-                        Плёнка видна только вам: доступ меняется на странице папки.{" "}
-                        <Link href={`/rolls/${job.rollId}`} className="text-accent underline underline-offset-4">
-                          Открыть папку
-                        </Link>
-                        {" · "}
-                        <button type="button" onClick={reset} className="text-accent underline underline-offset-4">
-                          Загрузить ещё
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        Можно уйти на другие страницы сайта: загрузка продолжится, ход виден в углу экрана. Только не закрывайте вкладку
-                        до конца, иначе загрузка отменится.{" "}
-                        <Link href={`/rolls/${job.rollId}`} className="text-accent underline underline-offset-4">
-                          Открыть папку
-                        </Link>
-                      </>
-                    )}
-                  </p>
-                )
-              }
-              onSaved={(d) => {
-                setDraft(d);
-                if (jobId) renameJob(jobId, d.title || makeTitle(findFilm(d.filmId, films), d, d.iso));
-              }}
+              onSaved={(d) => jobId && renameJob(jobId, d.title || makeTitle(findFilm(d.filmId, films), d, d.iso))}
             />
           )}
         </div>
       </aside>
 
-      <section aria-label="Кадры" className="min-w-0 lg:col-start-1 lg:row-start-2">
-        <Thumbs items={view} started={!!job} onRetry={(id) => jobId && retryJob(jobId, id)} />
-      </section>
     </div>
+  );
+}
+
+/** Ниже lg: первые кадры маленькими превью и «+N»; нажатие раскрывает всю сетку (мельче, чем на компьютере) прямо под строкой */
+function Strip({ items, expanded, onToggle }: { items: QueueItem[]; expanded: boolean; onToggle: () => void }) {
+  const first = items.slice(0, 4);
+  const rest = items.length - first.length;
+  return (
+    <button type="button" onClick={onToggle} aria-expanded={expanded} className="mt-3 flex w-full items-center gap-1.5 text-left lg:hidden">
+      {first.map((i) => (
+        <span key={i.id} className="relative size-11 shrink-0 overflow-hidden rounded-[6px] bg-paper-deep ring-1 ring-line">
+          {i.url && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={i.url}
+              alt=""
+              referrerPolicy="no-referrer"
+              className={`size-full object-cover ${i.status === "done" || i.shown ? "" : "opacity-60"}`}
+            />
+          )}
+        </span>
+      ))}
+      {rest > 0 && <span className="grid size-11 shrink-0 place-items-center rounded-[6px] bg-paper-deep text-xs text-ink-soft ring-1 ring-line">+{rest}</span>}
+      <span className="ml-auto flex shrink-0 items-center gap-1 text-sm text-ink-soft">
+        {expanded ? "Свернуть" : "Все фото"}
+        <ChevronIcon width={12} height={12} className={expanded ? "-rotate-90" : "rotate-90"} />
+      </span>
+    </button>
   );
 }
 
@@ -334,7 +373,7 @@ function Thumbs({ items, started, onRetry }: { items: QueueItem[]; started: bool
   /** Миниатюры, которые не показались (Яндекс не сделал, браузер не умеет HEIC): вместо них название файла */
   const [broken, setBroken] = useState<ReadonlySet<number>>(new Set());
   return (
-    <ul className="grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-2 lg:mt-5">
+    <ul className="grid grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-1.5 lg:mt-5 lg:grid-cols-[repeat(auto-fill,minmax(88px,1fr))] lg:gap-2">
       {items.map((i) => (
         <li
           key={i.id}
@@ -390,155 +429,93 @@ function Thumbs({ items, started, onRetry }: { items: QueueItem[]; started: bool
 }
 
 /**
- * «Что это за плёнка?» — поля уже заполнены догадками, папка с ними уже создана. «Сохранить» меняет её сразу,
- * «Пропустить» прячет карточку. Пока папка создаётся (rollId ещё нет), сохранить нельзя, но заполнять можно.
+ * «Что это за плёнка?» — поля уже заполнены догадками, папка с ними уже создана. «Сохранить и продолжить» меняет её
+ * и ведёт в папку, «Не сохранять» — в папку без изменений; загрузка идёт дальше в фоне. Пока папка создаётся
+ * (rollId ещё нет), уйти нельзя, но заполнять можно
  */
 function RollCard({
-  draft: saved,
+  draft: initial,
   rollId,
   films,
   cameras,
+  finished,
   onFilm,
   onCamera,
   onSaved,
-  note,
 }: {
   draft: Draft;
-  /** Ход загрузки словами (можно уйти со страницы, открыть папку): внизу карточки в любом её виде */
-  note?: React.ReactNode;
   rollId: number | null;
   films: Film[];
   cameras: Camera[];
+  finished: boolean;
   onFilm: (f: Film) => void;
   onCamera: (c: Camera) => void;
   onSaved: (d: Draft) => void;
 }) {
-  const [draft, setDraft] = useState(saved);
-  const [state, setState] = useState<"edit" | "saving" | "saved" | "skipped">("edit");
+  const router = useRouter();
+  const [title, setTitle] = useState(initial.title ?? "");
+  const [film, setFilm] = useState<FilmValue>(() => filmValue(initial.filmId, initial.format, initial.iso, films));
+  const [camera, setCamera] = useState(() => cameras.find((c) => c.id === initial.cameraId)?.name ?? "");
+  const [period, setPeriod] = useState<PeriodValue>({ month: initial.month, year: initial.year, endMonth: initial.endMonth, endYear: initial.endYear });
+  const [description, setDescription] = useState(initial.description);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [adding, setAdding] = useState<"film" | "camera" | null>(null);
-  const [newName, setNewName] = useState("");
-  const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
 
-  const film = findFilm(draft.filmId, films);
-  const auto = makeTitle(film, draft, draft.iso);
-  const title = draft.title?.trim() || auto;
-
-  const pickFilm = (v: string) => {
-    if (v === NEW) return setAdding("film");
-    // ISO по плёнке; у «не знаю» ISO остаётся прежним (например, узнанным по названию папки)
-    const f = findFilm(v, films);
-    setDraft((d) => ({ ...d, filmId: v, iso: f.iso ?? (v === UNKNOWN_FILM ? d.iso : null) }));
-  };
-  const pickCamera = (v: string) => (v === NEW ? setAdding("camera") : set("cameraId", v));
-
-  const addNew = async () => {
-    const name = newName.trim();
-    if (!name) return;
-    if (adding === "film") {
-      const guessIso = Number(name.match(/(\d{2,4})\s*$/)?.[1]);
-      const f = await createFilmAction(name, ISO_VALUES.includes(guessIso) ? guessIso : null);
-      if (!f) return setError("Не удалось добавить плёнку");
-      onFilm(f);
-      setDraft((d) => ({ ...d, filmId: f.id, iso: f.iso ?? d.iso }));
-    } else {
-      const c = await createCameraAction(name);
-      if (!c) return setError("Не удалось добавить камеру");
-      onCamera(c);
-      set("cameraId", c.id);
-    }
-    setNewName("");
-    setAdding(null);
-  };
+  const auto = makeTitle(findFilm(film.filmId ?? UNKNOWN_FILM, films), period, film.iso);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (rollId === null || state === "saving") return;
-    setState("saving");
+    if (rollId === null || saving) return;
+    setSaving(true);
     setError(null);
+    const ids = await resolveFilmAndCamera(film, camera, films, cameras);
+    if (!ids) {
+      setSaving(false);
+      return setError("Не удалось сохранить плёнку или камеру, попробуйте ещё раз");
+    }
+    if (ids.newFilm) onFilm(ids.newFilm);
+    if (ids.newCamera) onCamera(ids.newCamera);
     // название, совпадающее с автоматическим, не фиксируем: оно продолжит следовать за плёнкой и датой
-    const custom = draft.title?.trim() || null;
-    const edit = { ...draft, title: custom && custom !== auto ? custom : null, description: draft.description.trim() };
-    const ok = await saveRollAction(rollId, edit);
-    if (!ok) {
-      setState("edit");
+    const custom = title.trim() || null;
+    const edit: Draft = {
+      title: custom && custom !== auto ? custom : null,
+      description: description.trim(),
+      filmId: ids.filmId,
+      cameraId: ids.cameraId,
+      iso: ids.iso,
+      format: film.format,
+      ...period,
+    };
+    if (!(await saveRollAction(rollId, edit))) {
+      setSaving(false);
       return setError("Не удалось сохранить, попробуйте ещё раз");
     }
     onSaved(edit);
-    setState("saved");
+    router.push(`/rolls/${rollId}`);
   };
 
-  const card = "rounded-[20px] bg-paper-light p-5 shadow-[var(--card-ring)]";
-
-  if (state === "skipped" || state === "saved") {
-    return (
-      <div className={card} role="status">
-        {state === "saved" ? (
-          <>
-            <p className="flex items-center gap-2 text-sm text-ink">
-              <CheckIcon width={14} height={14} /> Сохранили
-            </p>
-            <p className="mt-1 text-ink-soft">{title}</p>
-          </>
-        ) : (
-          <p className="text-sm text-ink-soft">Данные плёнки можно поправить потом: «Изменить» на странице папки.</p>
-        )}
-        <button type="button" onClick={() => setState("edit")} className="mt-3 text-sm text-accent underline underline-offset-4">
-          {state === "saved" ? "Изменить" : "Заполнить сейчас"}
-        </button>
-        {note && <div className="mt-4 border-t border-line pt-4">{note}</div>}
-      </div>
-    );
-  }
-
   return (
-    <form onSubmit={save} className={`${card} space-y-4`} aria-label="Что это за плёнка?">
+    <form onSubmit={save} className="space-y-4 rounded-[20px] bg-paper-light p-5 shadow-[var(--card-ring)]" aria-label="Что это за плёнка?">
       <h2 className="text-xl leading-tight">Что это за плёнка?</h2>
 
-      <Field label="Название папки" hint="Пусто: соберётся из плёнки и даты">
-        <input className={control} value={draft.title ?? ""} placeholder={auto} onChange={(e) => set("title", e.target.value)} />
+      <Field label="Название папки">
+        <input className={control} value={title} placeholder={auto} onChange={(e) => setTitle(e.target.value)} />
       </Field>
-
       <Field label="Плёнка">
-        <Select value={draft.filmId} onChange={(e) => pickFilm(e.target.value)}>
-          {films.map((f) => (
-            <option key={f.id} value={f.id}>
-              {filmLabel(f)}
-            </option>
-          ))}
-          <option value={NEW}>＋ Добавить свою…</option>
-        </Select>
+        <FilmField value={film} films={films} onChange={setFilm} />
       </Field>
-      {adding === "film" && <AddInline value={newName} onChange={setNewName} onSave={addNew} onCancel={() => setAdding(null)} placeholder="Например, Kodak Vision3 500T" />}
-
       <Field label="Камера">
-        <Select value={draft.cameraId} onChange={(e) => pickCamera(e.target.value)}>
-          <option value="">не указана</option>
-          {cameras.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-          <option value={NEW}>＋ Добавить камеру…</option>
-        </Select>
+        <CameraField value={camera} cameras={cameras} onChange={setCamera} />
       </Field>
-      {adding === "camera" && <AddInline value={newName} onChange={setNewName} onSave={addNew} onCancel={() => setAdding(null)} placeholder="Например, Pentax 155g" />}
-
-      <Field label="Формат">
-        <Select value={draft.format} onChange={(e) => set("format", e.target.value as Format)}>
-          <option value="35">35 мм</option>
-          <option value="120">120, средний формат</option>
-        </Select>
+      <Field label="Период съёмки">
+        <PeriodPicker value={period} onChange={setPeriod} />
       </Field>
-
-      <PeriodFields value={draft} onChange={(p) => setDraft((d) => ({ ...d, ...p }))} />
-
       <Field label="Описание">
         <textarea
-          className={`${control} min-h-20 resize-y`}
-          value={draft.description}
+          className={`${control} min-h-14 resize-y`}
+          value={description}
           placeholder="Где снимали, что за поездка"
-          onChange={(e) => set("description", e.target.value)}
+          onChange={(e) => setDescription(e.target.value)}
         />
       </Field>
 
@@ -547,57 +524,28 @@ function RollCard({
           {error}
         </p>
       )}
-      <div className="flex items-center gap-4 pt-1">
-        <button
-          type="submit"
-          disabled={rollId === null || state === "saving"}
-          className="rounded-control bg-ink px-5 py-2.5 text-sm text-paper transition-opacity hover:opacity-85 disabled:opacity-40"
-        >
-          {state === "saving" ? "Сохраняем…" : rollId === null ? "Создаём папку…" : "Сохранить"}
-        </button>
-        <button type="button" onClick={() => setState("skipped")} className="text-sm text-ink-soft underline underline-offset-4 hover:text-ink">
-          Пропустить
-        </button>
+      <div className="border-t border-line pt-4">
+        <p className="text-sm text-ink-soft">
+          {finished ? "Все фото загружены" : "Фото загружаются в фоне. Не закрывайте вкладку, пока загрузка не закончится"}
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <button
+            type="submit"
+            disabled={rollId === null || saving}
+            className="rounded-control bg-ink px-5 py-2.5 text-sm text-paper transition-opacity hover:opacity-85 disabled:opacity-40"
+          >
+            {saving ? "Сохраняем…" : rollId === null ? "Создаём папку…" : "Сохранить и продолжить"}
+          </button>
+          <button
+            type="button"
+            disabled={rollId === null}
+            onClick={() => rollId !== null && router.push(`/rolls/${rollId}`)}
+            className="text-sm text-ink-soft underline underline-offset-4 hover:text-ink disabled:opacity-40"
+          >
+            Не сохранять
+          </button>
+        </div>
       </div>
-      {note && <div className="border-t border-line pt-4">{note}</div>}
     </form>
-  );
-}
-
-function AddInline({
-  value,
-  onChange,
-  onSave,
-  onCancel,
-  placeholder,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onSave: () => void;
-  onCancel: () => void;
-  placeholder: string;
-}) {
-  return (
-    <span className="-mt-2 flex gap-2">
-      <input
-        autoFocus
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            onSave();
-          } else if (e.key === "Escape") onCancel();
-        }}
-        placeholder={placeholder}
-        className={control}
-      />
-      <button type="button" onClick={onSave} className="shrink-0 rounded-control bg-ink px-3 text-sm text-paper">
-        Добавить
-      </button>
-      <button type="button" onClick={onCancel} className="shrink-0 px-1 text-sm text-ink-soft hover:text-ink">
-        Отмена
-      </button>
-    </span>
   );
 }

@@ -4,15 +4,16 @@ import { usePathname } from "next/navigation";
 
 /** Показывать общую навигацию (Лента/Папки/Загрузить) — и капсулу в шапке на десктопе, и
  * вкладки в нижнем баре на мобильном/планшете (см. SiteHeader.tsx и BottomBarNav.tsx) — только
- * когда в архиве уже есть кадры и мы не на самой странице загрузки (там сверху своя кнопка
- * «Назад», см. BackButton.tsx). Одна функция для обоих мест, чтобы условие не разъехалось.
+ * когда в архиве уже есть плёнки. На странице загрузки капсулы в шапке нет (там своя кнопка «Назад»,
+ * см. BackButton.tsx), а нижний бар на телефоне остаётся (onUpload): «Назад» там не показывается, и бар —
+ * единственный путь со страницы. Одна функция для обоих мест, чтобы условие не разъехалось.
  * /preview-welcome — служебная страница для просмотра пустого состояния ленты (см. её файл):
  * hasArchive там всегда true (берётся из настоящего каталога в layout.tsx, а не подменяется),
  * поэтому её приходится исключать явно, иначе шапка на ней всегда с навигацией.
  */
-export function useShowNav(hasArchive: boolean) {
+export function useShowNav(hasArchive: boolean, { onUpload = false } = {}) {
   const path = usePathname();
-  return hasArchive && !path.startsWith("/upload") && path !== "/preview-welcome";
+  return hasArchive && (onUpload || !path.startsWith("/upload")) && path !== "/preview-welcome";
 }
 
 /** Именно тогда, когда за хедером — не обычная страница, а сам WelcomeReel во весь экран

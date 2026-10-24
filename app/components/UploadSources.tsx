@@ -81,7 +81,7 @@ export default function UploadSources({
   };
 
   return (
-    <div className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-4xl flex-col justify-center pb-16 pt-6">
+    <div className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-4xl flex-col justify-center pb-28 pt-6 md:pb-16">
       {photos.length > 0 && (
         <div className="mx-auto mb-6 w-full max-w-60 md:mb-8 md:max-w-80">
           <PhotoFan pics={photos} />

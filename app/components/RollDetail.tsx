@@ -4,9 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useOptimistic, useRef, useState } from "react";
 import {
-  ISO_VALUES,
   VISIBILITIES,
-  filmLabel,
+  UNKNOWN_FILM,
   findFilm,
   formatLabel,
   makeTitle,
@@ -14,14 +13,14 @@ import {
   rollView,
   type Camera,
   type Film,
-  type Format,
   type Frame,
   type Roll,
   type RollEdit,
   type Visibility,
 } from "@/lib/catalog";
 import { deleteFrameAction, deleteRollAction, rotateFrameAction, saveRollAction, setRollVisibilityAction } from "../rolls/[id]/actions";
-import { control, Field, PeriodFields, Select } from "./fields";
+import { control, Field, type PeriodValue } from "./fields";
+import { CameraField, FilmField, PeriodPicker, filmValue, resolveFilmAndCamera, type FilmValue } from "./RollFields";
 import { LinkIcon } from "./icons";
 import Masonry from "./Masonry";
 import RollDescription from "./RollDescription";
@@ -190,14 +189,16 @@ function EditPanel({
   onCancel: () => void;
   onDelete: () => Promise<void>;
 }) {
-  const [draft, setDraft] = useState({ ...current, title: current.title ?? "", endMonth: current.endMonth ?? null, endYear: current.endYear ?? null });
+  const [title, setTitle] = useState(current.title ?? "");
+  const [description, setDescription] = useState(current.description);
+  const [film, setFilm] = useState<FilmValue>(() => filmValue(current.filmId, current.format, current.iso, films));
+  const [camera, setCamera] = useState(() => cameras.find((c) => c.id === current.cameraId)?.name ?? "");
+  const [period, setPeriod] = useState<PeriodValue>({ month: current.month, year: current.year, endMonth: current.endMonth ?? null, endYear: current.endYear ?? null });
+  const [saving, setSaving] = useState(false);
   // удаление в два шага: сначала вопрос, потом само удаление
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const set = <K extends keyof typeof draft>(k: K, v: (typeof draft)[K]) => setDraft((d) => ({ ...d, [k]: v }));
-
-  const auto = makeTitle(findFilm(draft.filmId, films), draft, draft.iso);
-  const isos = ISO_VALUES.includes(draft.iso ?? 0) || draft.iso === null ? ISO_VALUES : [...ISO_VALUES, draft.iso!].sort((a, b) => a - b);
+  const auto = makeTitle(findFilm(film.filmId ?? UNKNOWN_FILM, films), period, film.iso);
 
   // Esc закрывает панель без сохранения
   useEffect(() => {
@@ -206,21 +207,24 @@ function EditPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [onCancel]);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const custom = draft.title.trim();
+    if (saving) return;
+    setSaving(true);
+    // вписанные плёнка и камера: свои, которых ещё нет, заводятся у автора
+    const ids = await resolveFilmAndCamera(film, camera, films, cameras);
+    setSaving(false);
+    if (!ids) return alert("Не удалось сохранить плёнку или камеру");
+    const custom = title.trim();
     onSave({
       // название, совпадающее с автоматическим, не фиксируем: оно продолжит следовать за плёнкой и датой
       title: custom && custom !== auto ? custom : null,
-      description: draft.description.trim(),
-      filmId: draft.filmId,
-      cameraId: draft.cameraId,
-      iso: draft.iso,
-      format: draft.format,
-      month: draft.month,
-      year: draft.year,
-      endMonth: draft.endMonth,
-      endYear: draft.endYear,
+      description: description.trim(),
+      filmId: ids.filmId,
+      cameraId: ids.cameraId,
+      iso: ids.iso,
+      format: film.format,
+      ...period,
     });
   };
 
@@ -229,56 +233,22 @@ function EditPanel({
       onSubmit={submit}
       className="absolute inset-x-0 top-full z-30 mt-2 max-h-[calc(100dvh-14rem)] space-y-4 overflow-y-auto rounded-[20px] bg-paper-light px-5 pt-5 md:max-h-[calc(100dvh-9rem)] shadow-[0_8px_24px_rgba(0,0,0,0.5)] ring-1 ring-line sm:left-auto sm:w-[440px]"
     >
-      <Field label="Название" hint="Пусто: название соберётся из плёнки, даты и ISO">
-        <input autoFocus className={control} value={draft.title} placeholder={auto} onChange={(e) => set("title", e.target.value)} />
+      <Field label="Название">
+        <input autoFocus className={control} value={title} placeholder={auto} onChange={(e) => setTitle(e.target.value)} />
       </Field>
       <Field label="Описание">
-        <textarea className={`${control} min-h-24 resize-y`} value={draft.description} onChange={(e) => set("description", e.target.value)} />
+        <textarea className={`${control} min-h-14 resize-y`} value={description} onChange={(e) => setDescription(e.target.value)} />
       </Field>
-
-      <div className="grid grid-cols-2 gap-x-3 gap-y-4">
-        <div className="col-span-2">
-        <Field label="Плёнка">
-          <Select value={draft.filmId} onChange={(e) => set("filmId", e.target.value)}>
-            {films.map((f) => (
-              <option key={f.id} value={f.id}>
-                {filmLabel(f)}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        </div>
-        <div className="col-span-2">
-        <Field label="Камера">
-          <Select value={draft.cameraId} onChange={(e) => set("cameraId", e.target.value)}>
-            <option value="">не указана</option>
-            {draft.cameraId && !cameras.some((c) => c.id === draft.cameraId) && <option value={draft.cameraId}>{draft.cameraId}</option>}
-            {cameras.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        </div>
-        <Field label="Формат">
-          <Select value={draft.format} onChange={(e) => set("format", e.target.value as Format)}>
-            <option value="35">35 мм</option>
-            <option value="120">120</option>
-          </Select>
-        </Field>
-        <Field label="ISO съёмки">
-          <Select value={draft.iso ?? ""} onChange={(e) => set("iso", e.target.value ? Number(e.target.value) : null)}>
-            <option value="">не указано</option>
-            {isos.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </div>
-      <PeriodFields value={draft} onChange={(p) => setDraft((d) => ({ ...d, ...p }))} />
+      <Field label="Плёнка">
+        <FilmField value={film} films={films} onChange={setFilm} />
+      </Field>
+      <Field label="Камера">
+        <CameraField value={camera} cameras={cameras} onChange={setCamera} />
+      </Field>
+      {/* ISO — то, что у плёнки: отдельного поля нет */}
+      <Field label="Период съёмки">
+        <PeriodPicker value={period} onChange={setPeriod} />
+      </Field>
 
       <div className="sticky bottom-0 -mx-5 bg-paper-light px-5 pb-5 pt-3">
         {confirming ? (
@@ -306,8 +276,8 @@ function EditPanel({
           </div>
         ) : (
           <div className="flex gap-2">
-            <button type="submit" className={`${button} bg-ink text-paper hover:bg-ink/85`}>
-              Сохранить
+            <button type="submit" disabled={saving} className={`${button} bg-ink text-paper hover:bg-ink/85 disabled:opacity-50`}>
+              {saving ? "Сохраняем…" : "Сохранить"}
             </button>
             <button type="button" onClick={onCancel} className={`${button} bg-paper-deep text-ink-faint hover:text-ink-soft`}>
               Отмена

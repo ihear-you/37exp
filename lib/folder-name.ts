@@ -35,9 +35,9 @@ export function parseFolderName(name: string, films: readonly Film[]): FolderGue
   // плёнка: ищем самое длинное совпавшее написание (Lucky200 = Lucky Color 200)
   let bestLen = 0;
   for (const film of films) {
-    // своя плёнка пользователя написаний не имеет: ищем её по самому названию
+    // и по самому названию (у своих плёнок пользователя других написаний нет)
     const own = film.name.toLowerCase().replace(/ё/g, "е").replace(/[^a-z0-9а-я]/g, "");
-    for (const syn of [...film.synonyms, own]) {
+    for (const syn of [...(film.synonyms ?? []), own]) {
       if (syn.length > bestLen && squashed.includes(syn)) {
         bestLen = syn.length;
         guess.filmId = film.id;

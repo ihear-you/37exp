@@ -30,7 +30,8 @@ export default async function UploadPage() {
       <UploadFlow
         films={films}
         cameras={cameras}
-        defaults={{ cameraId, format: last?.format ?? "35" }}
+        // формат по умолчанию — 35 мм; 120 выбирается строкой подсказки плёнки или кнопкой в поле
+        defaults={{ cameraId, format: "35" }}
         photos={photos}
         first={rolls.length === 0}
       />

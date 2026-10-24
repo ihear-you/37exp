@@ -128,3 +128,13 @@ export function LinkIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** Календарь: поле периода съёмки */
+export function CalendarIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="4" y="5.5" width="16" height="14.5" rx="2" />
+      <path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" />
+    </svg>
+  );
+}

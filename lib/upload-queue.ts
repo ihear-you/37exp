@@ -157,6 +157,17 @@ export function renameJob(jobId: string, title: string) {
 }
 
 /**
+ * Уходим со страницы загрузки: если загрузка уже закончилась и всё дошло, в углу её не показываем — человек видел
+ * итог на странице. Идущую или со сбойными файлами оставляем: окно в углу нужно, чтобы следить и повторить
+ */
+export function releaseFromForm(jobId: string) {
+  if (shownInForm === jobId) shownInForm = null;
+  const job = jobs.find((j) => j.id === jobId);
+  if (job?.finished && job.items.every((i) => i.status === "done")) dismissJob(jobId);
+  else listeners.forEach((l) => l());
+}
+
+/**
  * Убрать законченную загрузку из угла (крестик). Сама она не исчезает: в окне видно, что не загрузилось.
  * Миниатюры файлов с устройства форма отдаёт загрузчику при старте, здесь они и освобождаются
  */
@@ -165,6 +176,28 @@ export function dismissJob(jobId: string) {
   if (!job?.finished || shownInForm === jobId) return;
   job.items.forEach((i) => i.url?.startsWith("blob:") && URL.revokeObjectURL(i.url));
   setJobs(jobs.filter((j) => j.id !== jobId));
+}
+
+/**
+ * Отменить загрузку целиком («Выбрать другие фото»): запросы этой загрузки обрываются, сервер стирает её кадры
+ * и созданную ею плёнку (как при закрытии вкладки), из окна в углу она пропадает
+ */
+export function cancelJob(jobId: string) {
+  const job = jobs.find((j) => j.id === jobId);
+  if (!job) return;
+  for (const [k, c] of controllers) {
+    if (k.startsWith(`${jobId}:`)) {
+      c.abort();
+      controllers.delete(k);
+    }
+  }
+  for (const k of [...fileStates.keys()]) if (k.startsWith(`${jobId}:`)) fileStates.delete(k);
+  clearInterval(polls.get(jobId));
+  polls.delete(jobId);
+  job.items.forEach((i) => i.url?.startsWith("blob:") && URL.revokeObjectURL(i.url));
+  setJobs(jobs.filter((j) => j.id !== jobId));
+  if (!job.finished) void fetch(`/api/uploads/${jobId}/abort`, { method: "POST", keepalive: true }).catch(() => {});
+  log(`загрузка «${job.title}» отменена: выбрали другие фото`);
 }
 
 /** Повтор: одного кадра (itemId) или всех сбойных. Импорт повторяет сервер, и сразу все сбойные файлы */
