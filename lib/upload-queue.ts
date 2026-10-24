@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { retryImportAction } from "@/app/upload/actions";
 
-// Загрузчик на весь сайт: загрузка, начатая в форме (UploadPrototype.tsx), живёт здесь, а не в форме,
+// Загрузчик на весь сайт: загрузка, начатая на странице загрузки (UploadFlow.tsx), живёт здесь, а не в форме,
 // поэтому из формы можно уйти на любую страницу сайта — кадры продолжат уходить, ход виден в углу
 // (UploadIndicator.tsx). Оригиналы с устройства отправляет браузер по три сразу; импорт с Диска качает сервер,
 // а загрузчик спрашивает, как он идёт.
@@ -149,6 +149,11 @@ export function startImportJob(job: Omit<UploadJob, "kind" | "startedAt" | "fini
   setJobs([...jobs, { ...job, kind: "import", startedAt: performance.now(), finished: false }]);
   guardLeaving();
   poll(job.id);
+}
+
+/** Плёнку переименовали в карточке «Что это за плёнка?»: окно загрузки показывает новое название */
+export function renameJob(jobId: string, title: string) {
+  patchJob(jobId, (j) => ({ ...j, title }));
 }
 
 /**

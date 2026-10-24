@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { handOffUpload, isImageFile } from "@/lib/upload-handoff";
+import { collectDropped, handOffUpload, isImageFile, type UploadHandoff } from "@/lib/upload-handoff";
 import { previewImportAction } from "../upload/actions";
 import { control } from "./fields";
 import { LinkIcon, UploadIcon } from "./icons";
@@ -11,11 +11,21 @@ import PhotoFan, { type FanPic } from "./PhotoFan";
 const tile =
   "flex min-h-48 flex-col items-center justify-center rounded-[20px] bg-paper-light p-6 text-center shadow-[var(--card-ring)] transition-shadow md:min-h-72 md:p-8";
 
-/** Папки, пока плёнок нет: вместо формы загрузки сразу два способа взять кадры. Сама форма
- * (UploadPrototype.tsx) открывается уже с выбранными кадрами: они передаются через lib/upload-handoff.ts.
- * photos: фото Unsplash для веера над заголовком, такого же, как на карточке папки; без них веера нет. */
-export default function EmptyArchive({ photos }: { photos: FanPic[] }) {
+/**
+ * Первый шаг загрузки: два способа взять кадры — с устройства (выбрать или перетащить файлы или папку) и по ссылке
+ * с Яндекс Диска. Стоит на /upload и на пустой странице папок. Выбранное уходит в onPick; без него (на странице
+ * папок) — на /upload через lib/upload-handoff.ts, там загрузка и начнётся.
+ * photos: фото Unsplash для веера над заголовком, такого же, как на карточке папки; без них веера нет.
+ */
+export default function UploadSources({
+  photos,
+  onPick,
+}: {
+  photos: FanPic[];
+  onPick?: (picked: UploadHandoff) => void;
+}) {
   const router = useRouter();
+  const [drag, setDrag] = useState(false);
   const folderInput = useRef<HTMLInputElement>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [url, setUrl] = useState("");
@@ -26,17 +36,33 @@ export default function EmptyArchive({ photos }: { photos: FanPic[] }) {
     folderInput.current?.setAttribute("webkitdirectory", "");
   }, []);
 
-  const onPick = (e: React.ChangeEvent<HTMLInputElement>, isFolder: boolean) => {
-    const files = [...(e.target.files ?? [])];
-    e.target.value = "";
+  const pick = (picked: UploadHandoff) => {
+    if (onPick) return onPick(picked);
+    handOffUpload(picked);
+    router.push("/upload");
+  };
+
+  const takeFiles = (files: File[], folder: string | null) => {
     if (!files.length) return;
     if (!files.some(isImageFile)) {
-      setFileError(isFolder ? "В этой папке нет картинок" : "Это не картинки: нужны JPEG, PNG, TIFF или WebP");
+      setFileError(folder ? "В этой папке нет картинок" : "Это не картинки: нужны JPEG, PNG, TIFF или WebP");
       return;
     }
-    const folder = isFolder ? (files[0]?.webkitRelativePath.split("/")[0] ?? null) : null;
-    handOffUpload({ kind: "files", files, folder });
-    router.push("/upload");
+    setFileError(null);
+    pick({ kind: "files", files, folder });
+  };
+
+  const onFiles = (e: React.ChangeEvent<HTMLInputElement>, isFolder: boolean) => {
+    const files = [...(e.target.files ?? [])];
+    e.target.value = "";
+    takeFiles(files, isFolder ? (files[0]?.webkitRelativePath.split("/")[0] ?? null) : null);
+  };
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDrag(false);
+    const { files, folder } = await collectDropped(e.dataTransfer);
+    takeFiles(files, folder);
   };
 
   const findByLink = async () => {
@@ -50,8 +76,8 @@ export default function EmptyArchive({ photos }: { photos: FanPic[] }) {
       setLinkError(res.error);
       return;
     }
-    handOffUpload({ kind: "link", url: link, listing: res });
-    router.push("/upload");
+    setBusy(false);
+    pick({ kind: "link", url: link, listing: res });
   };
 
   return (
@@ -61,17 +87,24 @@ export default function EmptyArchive({ photos }: { photos: FanPic[] }) {
           <PhotoFan pics={photos} />
         </div>
       )}
-      <h1 className="text-center text-[26px] leading-tight md:text-[36px]">Загрузите первую плёнку</h1>
-      <p className="mt-2 text-center text-ink-soft">Плёнку будете видеть только вы, пока сами не откроете доступ</p>
+      <h1 className="text-center text-[26px] leading-tight md:text-[36px]">Загрузите плёнку</h1>
 
       <div className="mt-8 grid gap-3 md:grid-cols-2 md:gap-4">
-        {/* плитка целиком открывает выбор файлов; «выбрать папку» — отдельная кнопка под ней */}
-        <div className={`${tile} relative hover:shadow-[var(--card-ring-hover)]`}>
+        {/* плитка целиком открывает выбор файлов, на неё же можно бросить файлы или папку; «выбрать папку» — кнопка под ней */}
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDrag(true);
+          }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={onDrop}
+          className={`${tile} relative hover:shadow-[var(--card-ring-hover)] ${drag ? "shadow-[var(--card-ring-hover)] ring-2 ring-accent" : ""}`}
+        >
           <label className="flex cursor-pointer flex-col items-center after:absolute after:inset-0 after:rounded-[20px]">
             <UploadIcon width={32} height={32} className="text-ink-soft" />
             <span className="mt-4 text-lg">С устройства</span>
             <span className="mt-1 max-w-xs text-sm text-ink-soft">Сканы плёнки с компьютера или телефона</span>
-            <input type="file" multiple accept="image/*" className="sr-only" onChange={(e) => onPick(e, false)} />
+            <input type="file" multiple accept="image/*" className="sr-only" onChange={(e) => onFiles(e, false)} />
           </label>
           {/* папку целиком умеют отдавать только браузеры на компьютере */}
           <button
@@ -81,7 +114,7 @@ export default function EmptyArchive({ photos }: { photos: FanPic[] }) {
           >
             или выбрать папку целиком
           </button>
-          <input ref={folderInput} type="file" multiple className="sr-only" tabIndex={-1} onChange={(e) => onPick(e, true)} />
+          <input ref={folderInput} type="file" multiple className="sr-only" tabIndex={-1} onChange={(e) => onFiles(e, true)} />
           {fileError && (
             <p className="relative z-10 mt-3 text-sm text-accent-vivid" role="alert">
               {fileError}
@@ -114,7 +147,7 @@ export default function EmptyArchive({ photos }: { photos: FanPic[] }) {
               disabled={busy || !url.trim()}
               className="rounded-control bg-ink px-4 py-2 text-sm text-paper transition-opacity hover:opacity-85 disabled:opacity-40"
             >
-              {busy ? "Ищем…" : "Найти кадры"}
+              {busy ? "Ищем…" : "Загрузить"}
             </button>
           </div>
           {linkError && (

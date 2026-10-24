@@ -9,7 +9,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   const { provider: id } = await params;
   if (!isProvider(id)) return new Response(null, { status: 404 });
   const provider = getProvider(id);
-  if (!provider.configured()) return NextResponse.redirect(`${appUrl()}/login?error=config`);
+  if (!provider.configured()) return NextResponse.redirect(`${appUrl()}/?login=config`);
 
   const state = generateState();
   const verifier = generateCodeVerifier();

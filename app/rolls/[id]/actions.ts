@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { VISIBILITIES, type Film, type RollEdit, type Visibility } from "@/lib/catalog";
+import { VISIBILITIES, validPeriod, type Film, type RollEdit, type Visibility } from "@/lib/catalog";
 import { requireUser } from "@/lib/auth/session";
 import { deleteFrame, deleteRoll, getMyFilms, restoreFrames, setRollVisibility, updateRoll } from "@/lib/db";
 import { rotatePhoto, type RotateError } from "@/lib/photos/rotate";
@@ -14,8 +14,7 @@ function valid(e: RollEdit, films: Film[]) {
   return (
     films.some((f) => f.id === e.filmId) &&
     (e.format === "35" || e.format === "120") &&
-    isInt(e.month, 1, 12) &&
-    isInt(e.year, 1900, 2200) &&
+    validPeriod(e) &&
     (e.iso === null || isInt(e.iso, 1, 100000)) &&
     typeof e.cameraId === "string" &&
     typeof e.description === "string" &&

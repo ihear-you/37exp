@@ -88,6 +88,15 @@ const PROVIDERS: Record<ProviderId, Provider> = {
 export const isProvider = (id: string): id is ProviderId => Object.hasOwn(PROVIDERS, id);
 export const getProvider = (id: ProviderId) => PROVIDERS[id];
 
-/** Способы входа с заполненными ключами, для кнопок на /login */
+/** Способы входа с заполненными ключами; Яндекс первым (на проде он единственный) */
 export const configuredProviders = () =>
-  (Object.keys(PROVIDERS) as ProviderId[]).filter((id) => PROVIDERS[id].configured()).map((id) => ({ id, label: PROVIDERS[id].label }));
+  (["yandex", "google"] as ProviderId[]).filter((id) => PROVIDERS[id].configured()).map((id) => ({ id, label: PROVIDERS[id].label }));
+
+/**
+ * Куда вести «Войти»: сразу к сервису входа, своей страницы входа у сайта нет. next — куда вернуться после входа.
+ * Если ключей нет ни у одного сервиса — на главную, там заставка скажет, что вход не настроен
+ */
+export function signInHref(next: string) {
+  const provider = configuredProviders()[0];
+  return provider ? `/api/auth/${provider.id}?next=${encodeURIComponent(next)}` : "/?login=config";
+}

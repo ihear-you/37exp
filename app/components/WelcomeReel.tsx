@@ -94,9 +94,18 @@ export interface SignInOption {
 
 const cta = "flex items-center gap-1.5 rounded-control bg-ink px-6 py-2.5 text-sm text-paper transition-opacity hover:opacity-85";
 
-/** signIn: заставку видит гость, и кнопка одна, «Войти» (сразу к сервису входа, без страницы /login).
+/** signIn: заставку видит гость, и кнопка одна, «Войти через …» (сразу к сервису входа, своей страницы входа нет).
+ * loginError: вход не удался (сервис входа вернул на главную с ?login=…), текст под кнопкой.
  * Без signIn заставку видит вошедший с пустым архивом, и кнопка ведёт на загрузку. */
-export default function WelcomeReel({ photos, signIn }: { photos: EditorialPhoto[]; signIn?: SignInOption[] }) {
+export default function WelcomeReel({
+  photos,
+  signIn,
+  loginError,
+}: {
+  photos: EditorialPhoto[];
+  signIn?: SignInOption[];
+  loginError?: string;
+}) {
   const pool = useMemo<Pic[]>(
     () =>
       photos.length > 0
@@ -150,12 +159,12 @@ export default function WelcomeReel({ photos, signIn }: { photos: EditorialPhoto
                   Войти через {p.label}
                 </a>
               ))}
-              {signIn.length === 0 && (
-                <Link href="/login" className={cta}>
-                  Войти
-                </Link>
-              )}
             </div>
+            {(loginError || signIn.length === 0) && (
+              <p className="mt-3 max-w-sm text-sm text-accent-vivid" role="alert">
+                {loginError ?? "Вход ещё не настроен: нет ключей Яндекса или Google (см. README)."}
+              </p>
+            )}
           </>
         ) : (
           <>

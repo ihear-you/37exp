@@ -19,14 +19,16 @@ export interface Film {
   synonyms: string[];
 }
 
-/** Кто видит плёнку: только автор, любой по ссылке со своим ключом, или все (в том числе в списке на странице автора) */
+/**
+ * Кто видит плёнку: только автор или любой по ссылке со своим ключом. "public" (плёнка ещё и на странице автора /u/…)
+ * больше не выбирается: миграция 11 перевела такие плёнки в "link"; значение осталось в базе и в правилах доступа
+ */
 export type Visibility = "private" | "link" | "public";
 
 /** short: подпись на кнопке доступа; label и hint: в списке выбора */
 export const VISIBILITIES: { id: Visibility; short: string; label: string; hint: string }[] = [
   { id: "private", short: "Только я", label: "Только я", hint: "Плёнку видите только вы" },
-  { id: "link", short: "По ссылке", label: "Все, у кого есть ссылка", hint: "В списках не видна, открывается только по ссылке" },
-  { id: "public", short: "Видна всем", label: "Все", hint: "Плёнка есть на вашей странице, её может открыть любой" },
+  { id: "link", short: "По ссылке", label: "Все, у кого есть ссылка", hint: "Откроет любой, кому вы отправите ссылку" },
 ];
 
 export interface Camera {
@@ -43,6 +45,9 @@ export interface Roll {
   cameraId: string;
   year: number;
   month: number;
+  /** Конец периода съёмки, если плёнку снимали дольше месяца; иначе нет */
+  endYear?: number | null;
+  endMonth?: number | null;
   description: string;
   /** Своё название; без него название собирается из плёнки, даты и ISO */
   title?: string | null;
@@ -62,6 +67,9 @@ export interface RollEdit {
   format: Format;
   month: number;
   year: number;
+  /** Конец периода съёмки; null — сняли за один месяц */
+  endMonth: number | null;
+  endYear: number | null;
 }
 
 export interface Frame {
@@ -84,7 +92,7 @@ export const UNKNOWN_FILM = "unknown";
 
 export const FILMS: Film[] = [
   { id: UNKNOWN_FILM, name: "Не знаю / не указана", iso: null, synonyms: [] },
-  { id: "kodak-color-plus-200", name: "Kodak Color Plus 200", iso: 200, synonyms: ["kodakcolorplus200", "kodakcolorplus", "colorplus200", "colorplus"] },
+  { id: "kodak-color-plus-200", name: "Kodak Color Plus 200", iso: 200, synonyms: ["kodakcolorplus200", "kodakcolorplus", "colorplus200", "colorplus", "kodakcolor200", "kodakcolor"] },
   { id: "kodak-gold-200", name: "Kodak Gold 200", iso: 200, synonyms: ["kodakgold200", "kodakgold", "gold200"] },
   { id: "lucky-color-200", name: "Lucky Color 200", iso: 200, synonyms: ["luckycolor200", "luckycolor", "lucky200", "lucky"] },
   { id: "perspectiva-super-f-200", name: "Perspectiva Super-F 200", iso: 200, synonyms: ["perspectivasuperf200", "perspectivasuperf", "perspectiva", "superf200"] },
@@ -125,22 +133,55 @@ export function filmLabel(f: Film) {
   return f.note ? `${f.name} (${f.note})` : f.name;
 }
 
+/** Когда снимали: месяц с годом и, если плёнку снимали дольше, конец периода */
+export interface Period {
+  year: number;
+  month: number;
+  endYear?: number | null;
+  endMonth?: number | null;
+}
+
+/** «июль 2025», «июль–август 2025», «декабрь 2025 – январь 2026». capital: с заглавной, когда строка с неё начинается */
+export function periodLabel(p: Period, capital = false) {
+  const start = MONTHS[p.month - 1];
+  const end = p.endYear && p.endMonth && rollDate({ year: p.endYear, month: p.endMonth }) > rollDate(p) ? { year: p.endYear, month: p.endMonth } : null;
+  const label = !end
+    ? `${start} ${p.year}`
+    : end.year === p.year
+      ? `${start}–${MONTHS[end.month - 1]} ${p.year}`
+      : `${start} ${p.year} – ${MONTHS[end.month - 1]} ${end.year}`;
+  return capital ? label.replace(/^./, (c) => c.toUpperCase()) : label;
+}
+
 /** «Kodak Gold 200 · июль 2025». Если ISO съёмки не совпал с заявленным, оно дописывается */
-export function makeTitle(film: Film, month: number, year: number, iso: number | null) {
+export function makeTitle(film: Film, period: Period, iso: number | null) {
   const name = film.id === UNKNOWN_FILM ? "Плёнка не указана" : film.name;
-  const parts = [name, `${MONTHS[month - 1]} ${year}`];
+  const parts = [name, periodLabel(period)];
   if (film.iso && iso && film.iso !== iso) parts.push(`ISO ${iso}`);
   return parts.join(" · ");
 }
 
 export function rollTitle(r: Roll, films: readonly Film[] = FILMS) {
-  return r.title || makeTitle(findFilm(r.filmId, films), r.month, r.year, r.iso);
+  return r.title || makeTitle(findFilm(r.filmId, films), r, r.iso);
 }
 
 export const formatLabel = (f: Format) => (f === "35" ? "35 мм" : "120, средний формат");
 
 /** Для сортировки по дате */
 export const rollDate = (r: { year: number; month: number }) => r.year * 12 + r.month;
+
+const isInt = (n: unknown, min: number, max: number) => Number.isInteger(n) && (n as number) >= min && (n as number) <= max;
+
+/** Проверка периода с клиента: начало обязательно, конец — оба поля или ни одного, и не раньше начала */
+export function validPeriod(p: { month: unknown; year: unknown; endMonth: unknown; endYear: unknown }) {
+  if (!isInt(p.month, 1, 12) || !isInt(p.year, 1900, 2200)) return false;
+  if (p.endMonth === null && p.endYear === null) return true;
+  return (
+    isInt(p.endMonth, 1, 12) &&
+    isInt(p.endYear, 1900, 2200) &&
+    rollDate({ year: p.endYear as number, month: p.endMonth as number }) >= rollDate({ year: p.year as number, month: p.month as number })
+  );
+}
 
 /** v — версия картинки (Frame.v): после поворота адрес другой, и браузер берёт новую копию, а не старую из памяти */
 export const feedSrc = (id: string, v?: number) => `/photos/f/${id}.jpg${v ? `?v=${v}` : ""}`;
@@ -158,6 +199,8 @@ export interface RollView {
   format: Format;
   year: number;
   month: number;
+  endYear: number | null;
+  endMonth: number | null;
   description: string;
   count: number;
 }
@@ -175,6 +218,8 @@ export function rollView(r: Roll, cameras: readonly Camera[], count: number, fil
     format: r.format,
     year: r.year,
     month: r.month,
+    endYear: r.endYear ?? null,
+    endMonth: r.endMonth ?? null,
     description: r.description,
     count,
   };

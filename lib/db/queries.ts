@@ -1,4 +1,4 @@
-import type { Camera, Film, Format, Frame, Roll, RollEdit, Visibility } from "../catalog";
+import { rollDate, type Camera, type Film, type Format, type Frame, type Roll, type RollEdit, type Visibility } from "../catalog";
 import { randomBytes } from "node:crypto";
 import { getDb } from "./connection";
 import { uniqueHandle } from "./handle";
@@ -15,6 +15,8 @@ interface RollRow {
   iso: number | null;
   year: number;
   month: number;
+  end_year: number | null;
+  end_month: number | null;
   title: string | null;
   description: string;
   visibility: Visibility;
@@ -31,6 +33,8 @@ const toRoll = (r: RollRow): Roll => ({
   cameraId: r.camera_id ?? "",
   year: r.year,
   month: r.month,
+  endYear: r.end_year,
+  endMonth: r.end_month,
   description: r.description,
   title: r.title,
   visibility: r.visibility,
@@ -68,7 +72,7 @@ const toFrame = (f: FrameRow): Frame => ({
 const FRAME_COLUMNS = "f.id, f.roll_id, f.idx, f.w, f.h, f.hue, f.sat, f.light, f.color, (f.bytes > 0 AND f.provisional = 0) AS original, f.version";
 
 const ROLL_SELECT = `
-  SELECT r.id, r.user_id, r.film_id, r.camera_id, r.format, r.iso, r.year, r.month, r.title, r.description,
+  SELECT r.id, r.user_id, r.film_id, r.camera_id, r.format, r.iso, r.year, r.month, r.end_year, r.end_month, r.title, r.description,
          r.visibility, r.share_key,
          (SELECT COUNT(*) FROM frames f WHERE f.roll_id = r.id AND f.deleted_at IS NULL) AS count
   FROM rolls r`;
@@ -138,14 +142,20 @@ export function listFramePreviews(userId: number, perRoll: number, onlyPublic = 
 /** Данные новой плёнки. Доступа здесь нет: новая плёнка всегда «только я», меняется он отдельно (setRollVisibility). */
 export type NewRoll = RollEdit;
 
+/** Конец периода хранится, только если он позже начала: плёнка, снятая за месяц, — без конца (NULL) */
+const periodEnd = (r: RollEdit) =>
+  r.endYear && r.endMonth && rollDate({ year: r.endYear, month: r.endMonth }) > rollDate(r)
+    ? { endYear: r.endYear, endMonth: r.endMonth }
+    : { endYear: null, endMonth: null };
+
 /** Создаёт плёнку пользователя и возвращает её номер. Доступ «только я» и ключ для ссылки ставятся здесь. */
 export function insertRoll(userId: number, r: NewRoll): number {
   const res = getDb()
     .prepare(
-      `INSERT INTO rolls (user_id, film_id, camera_id, format, iso, year, month, title, description, visibility, share_key)
-       VALUES (@userId, @filmId, @cameraId, @format, @iso, @year, @month, @title, @description, 'private', @shareKey)`,
+      `INSERT INTO rolls (user_id, film_id, camera_id, format, iso, year, month, end_year, end_month, title, description, visibility, share_key)
+       VALUES (@userId, @filmId, @cameraId, @format, @iso, @year, @month, @endYear, @endMonth, @title, @description, 'private', @shareKey)`,
     )
-    .run({ ...r, cameraId: r.cameraId || null, userId, shareKey: randomBytes(9).toString("hex") });
+    .run({ ...r, ...periodEnd(r), cameraId: r.cameraId || null, userId, shareKey: randomBytes(9).toString("hex") });
   return Number(res.lastInsertRowid);
 }
 
@@ -154,10 +164,11 @@ export function saveRoll(userId: number, id: number, e: RollEdit): boolean {
   const res = getDb()
     .prepare(
       `UPDATE rolls SET title = @title, description = @description, film_id = @filmId, camera_id = @cameraId,
-              iso = @iso, format = @format, month = @month, year = @year, updated_at = datetime('now')
+              iso = @iso, format = @format, month = @month, year = @year, end_month = @endMonth, end_year = @endYear,
+              updated_at = datetime('now')
        WHERE id = @id AND user_id = @userId`,
     )
-    .run({ ...e, cameraId: e.cameraId || null, id, userId });
+    .run({ ...e, ...periodEnd(e), cameraId: e.cameraId || null, id, userId });
   return res.changes > 0;
 }
 
@@ -235,7 +246,8 @@ export interface OAuthProfile {
  *    вход «забирает» его, и владелец сразу видит свои плёнки;
  * 4) иначе заводится новый пользователь.
  */
-export function findOrCreateOAuthUser(profile: OAuthProfile, claimDefaultUserId: number | null): UserRecord {
+/** created: аккаунт заведён этим входом (человек пришёл впервые) */
+export function findOrCreateOAuthUser(profile: OAuthProfile, claimDefaultUserId: number | null): UserRecord & { created: boolean } {
   const db = getDb();
   return db
     .transaction(() => {
@@ -253,6 +265,7 @@ export function findOrCreateOAuthUser(profile: OAuthProfile, claimDefaultUserId:
           .get(claimDefaultUserId);
         if (free) id = claimDefaultUserId;
       }
+      const created = id === undefined;
       if (id === undefined) {
         id = Number(
           db
@@ -274,7 +287,8 @@ export function findOrCreateOAuthUser(profile: OAuthProfile, claimDefaultUserId:
            email = CASE WHEN EXISTS (SELECT 1 FROM users WHERE email = @email AND id <> @id) THEN email ELSE @email END
          WHERE id = @id`,
       ).run({ name: profile.name, avatarUrl: profile.avatarUrl, email: profile.email, id });
-      return db.prepare("SELECT id, handle, name, email, avatar_url AS avatarUrl FROM users WHERE id = ?").get(id) as UserRecord;
+      const user = db.prepare("SELECT id, handle, name, email, avatar_url AS avatarUrl FROM users WHERE id = ?").get(id) as UserRecord;
+      return { ...user, created };
     })
     .immediate();
 }

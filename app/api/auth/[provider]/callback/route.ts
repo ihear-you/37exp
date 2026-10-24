@@ -7,7 +7,7 @@ import { findOrCreateOAuthUser } from "@/lib/db";
 
 // Возврат от провайдера: сверяем state, меняем код на профиль и заводим сессию
 export async function GET(request: Request, { params }: { params: Promise<{ provider: string }> }) {
-  const fail = (reason: string) => NextResponse.redirect(`${appUrl()}/login?error=${reason}`);
+  const fail = (reason: string) => NextResponse.redirect(`${appUrl()}/?login=${reason}`);
 
   const { provider: id } = await params;
   if (!isProvider(id)) return new Response(null, { status: 404 });
@@ -36,5 +36,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
 
   const user = await findOrCreateOAuthUser(profile, isOwnerEmail(profile.email));
   await startSession(user.id);
-  return NextResponse.redirect(`${appUrl()}${next}`);
+  // Впервые пришёл — значит, хочет завести свой архив: сразу к пустому состоянию с плитками загрузки, даже если
+  // нажал «Войти» на чужой плёнке. Аккаунт уже был — обратно туда, откуда входил
+  return NextResponse.redirect(`${appUrl()}${user.created ? "/rolls" : next}`);
 }

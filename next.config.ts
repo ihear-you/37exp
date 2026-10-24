@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // своей страницы входа больше нет («Войти» ведёт сразу к сервису входа): старые ссылки на /login — на главную
+  async redirects() {
+    return [{ source: "/login", destination: "/", permanent: false }];
+  },
   experimental: {
     // Открытые за последние 30 секунд страницы при возврате показываются из памяти браузера, без запроса к серверу:
     // переходы «Лента ↔ Папки» мгновенные, даже когда канал занят загрузкой фото. Правки и удаление (revalidatePath)

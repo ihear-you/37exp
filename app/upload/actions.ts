@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
-import { ISO_VALUES, type Camera, type Film, type Format } from "@/lib/catalog";
+import { ISO_VALUES, validPeriod, type Camera, type Film, type Format } from "@/lib/catalog";
 import {
   createCamera,
   createFilm,
@@ -18,7 +18,7 @@ import { ImportError, listYandex, normalizeYandexUrl } from "@/lib/import/yandex
 import { MAX_FRAMES_PER_UPLOAD, USER_QUOTA_BYTES } from "@/lib/photos/limits";
 import { startUpload } from "@/lib/uploads";
 
-// Серверные действия страницы загрузки. Кадры с компьютера принимает app/api/rolls/[id]/frames,
+// Серверные действия страницы загрузки. Кадры с устройства принимает app/api/uploads/[id]/parts и /frames,
 // импорт по ссылке (Яндекс Диск) идёт в фоне на сервере: lib/import, состояние отдаёт app/api/imports/[id].
 
 const isInt = (n: unknown, min: number, max: number) => Number.isInteger(n) && (n as number) >= min && (n as number) <= max;
@@ -39,7 +39,20 @@ export async function createCameraAction(name: string): Promise<Camera | null> {
   return createCamera(user.id, clean);
 }
 
-type NewRollInput = { filmId: string; format: Format; iso: number | null; cameraId: string; month: number; year: number; description: string };
+/** Новая плёнка: при старте загрузки — по подсказкам, поправить можно в карточке «Что это за плёнка?». cameraId "" — не указана */
+type NewRollInput = {
+  filmId: string;
+  format: Format;
+  iso: number | null;
+  cameraId: string;
+  month: number;
+  year: number;
+  endMonth: number | null;
+  endYear: number | null;
+  description: string;
+  /** Своё название папки (по названию папки-источника); null — соберётся из плёнки и даты */
+  title?: string | null;
+};
 
 /** Куда класть кадры: существующая плёнка или новая (она всегда создаётся «только я») */
 async function resolveRoll(
@@ -53,14 +66,15 @@ async function resolveRoll(
     !r ||
     !films.some((f) => f.id === r.filmId) ||
     (r.format !== "35" && r.format !== "120") ||
-    !isInt(r.month, 1, 12) ||
-    !isInt(r.year, 1900, 2200) ||
+    !validPeriod(r) ||
+    typeof r.cameraId !== "string" ||
     (r.iso !== null && !isInt(r.iso, 1, 100000)) ||
-    typeof r.description !== "string"
+    typeof r.description !== "string" ||
+    (r.title != null && typeof r.title !== "string")
   ) {
     return { ok: false, error: "Проверьте поля плёнки" };
   }
-  const created = await createRoll(userId, { ...r, title: null, description: r.description.trim().slice(0, 5000) });
+  const created = await createRoll(userId, { ...r, title: r.title?.trim().slice(0, 200) || null, description: r.description.trim().slice(0, 5000) });
   return created === null ? { ok: false, error: "Не удалось создать плёнку: проверьте камеру и плёнку" } : { ok: true, rollId: created };
 }
 

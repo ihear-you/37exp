@@ -11,18 +11,28 @@ const NAV = [
   { href: "/rolls", label: "Папки" },
 ];
 
-/** hasFrames: пока в архиве нет ни одного кадра, лента показывает во весь экран свой
- * собственный центральный «Загрузить кадры» — правые кнопки шапки тогда только дублируют
- * его и мешают по центру, поэтому на это время скрыты (см. useShowNav в lib/nav.ts).
+/** hasArchive: есть хоть одна плёнка. Пока плёнок нет, вместо ленты и папок экран с плитками загрузки
+ * (или заставка гостя) — правые кнопки шапки тогда только дублируют его, поэтому скрыты (см. useShowNav в lib/nav.ts).
  * Ниже md эти же кнопки живут в нижнем баре (BottomBarNav.tsx), поэтому здесь на мобильном
  * и планшете они тоже скрыты — остаётся только логотип. */
-export default function SiteHeader({ hasFrames, rollCount, user }: { hasFrames: boolean; rollCount: number; user: MenuUser | null }) {
+export default function SiteHeader({
+  hasArchive,
+  rollCount,
+  user,
+  signIn,
+}: {
+  hasArchive: boolean;
+  rollCount: number;
+  user: MenuUser | null;
+  /** Сервис входа для кнопки гостя; null — ключей нет */
+  signIn: { id: string; label: string } | null;
+}) {
   const path = usePathname();
   const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
-  const showNav = useShowNav(hasFrames);
+  const showNav = useShowNav(hasArchive);
   // На пустой ленте под хедером летают фотографии (WelcomeReel, во весь экран, включая
   // область под хедером) — хедер тогда прозрачный, чтобы это было видно, а не закрыто фоном.
-  const welcome = useIsWelcomeScreen(hasFrames);
+  const welcome = useIsWelcomeScreen(hasArchive);
 
   return (
     <header className={`sticky top-0 z-30 h-20 ${welcome ? "" : "bg-paper/90 backdrop-blur-md"}`}>
@@ -66,7 +76,7 @@ export default function SiteHeader({ hasFrames, rollCount, user }: { hasFrames: 
             Кроме заставки для гостя: там «Войти» — главная кнопка по центру, вторая в углу её дублирует */}
         {!(welcome && !user) && (
           <div className={showNav ? "ml-auto md:ml-4" : "ml-auto"}>
-            <UserMenu user={user} />
+            <UserMenu user={user} signIn={signIn} />
           </div>
         )}
       </nav>

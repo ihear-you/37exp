@@ -144,3 +144,24 @@ export async function getEditorialPhotos(perQuery = 20): Promise<EditorialPhoto[
   });
   return inflight;
 }
+
+/** Насколько цвет яркий и насыщенный (0–1): разница между самым сильным и самым слабым каналом */
+function chroma(hex: string) {
+  const n = Number.parseInt(hex.replace("#", ""), 16);
+  if (Number.isNaN(n)) return 0;
+  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  return (Math.max(...rgb) - Math.min(...rgb)) / 255;
+}
+
+/**
+ * Четыре фото для веера над плитками загрузки (пустые «Папки», /upload). Те же первые четыре из пула, только
+ * крайнее левое — самое цветастое из остальных пула (по основному цвету фото от Unsplash), если оно ярче:
+ * иначе слева часто оказывался тёмный кадр. Из того же суточного кэша, лишних запросов к Unsplash нет.
+ */
+export async function getFanPhotos(): Promise<{ id: string; src: string; color: string }[]> {
+  const photos = await getEditorialPhotos();
+  const fan = photos.slice(0, 4);
+  const brightest = photos.slice(4).reduce<EditorialPhoto | null>((best, p) => (!best || chroma(p.color) > chroma(best.color) ? p : best), null);
+  if (fan.length && brightest && chroma(brightest.color) > chroma(fan[0].color)) fan[0] = brightest;
+  return fan.map((p) => ({ id: p.id, src: p.src, color: p.color }));
+}

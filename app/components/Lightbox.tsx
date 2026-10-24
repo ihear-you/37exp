@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { MONTHS, feedSrc, fullSrc, type Frame, type RollView } from "@/lib/catalog";
+import { feedSrc, fullSrc, periodLabel, type Frame, type RollView } from "@/lib/catalog";
 import { ChevronIcon, CloseIcon, DownloadIcon, RotateIcon, TrashIcon } from "./icons";
 
 /** Повернуть кадр на 90° по часовой (сам оригинал); error — готовый текст для показа */
@@ -84,7 +84,7 @@ export default function Lightbox({ frames, rolls, index, onIndex, onClose, onDel
 
   if (!frame || !roll) return null;
 
-  const info = `${roll.film} · ${MONTHS[roll.month - 1]} ${roll.year}`;
+  const info = `${roll.film} · ${periodLabel(roll)}`;
 
   const turning = turn?.id === frame.id && turn.busy;
   const turnError = turn?.id === frame.id ? turn.error : undefined;

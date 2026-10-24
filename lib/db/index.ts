@@ -272,7 +272,7 @@ export const background = {
 export type { UserRecord, OAuthProfile } from "./queries";
 
 /** Если у владельца ещё нет своей записи, ему достаётся пользователь с данными из seed */
-export async function findOrCreateOAuthUser(profile: q.OAuthProfile, isOwner: boolean): Promise<q.UserRecord> {
+export async function findOrCreateOAuthUser(profile: q.OAuthProfile, isOwner: boolean): Promise<q.UserRecord & { created: boolean }> {
   await connection();
   return q.findOrCreateOAuthUser(profile, isOwner ? DEFAULT_USER_ID : null);
 }

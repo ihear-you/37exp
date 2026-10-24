@@ -178,6 +178,13 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
   /* 9: кадр можно повернуть; номер версии попадает в адрес картинки, чтобы браузер не показал старую из памяти */ `
   ALTER TABLE frames ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
   `,
+  /* 10: плёнку снимали дольше месяца: конец периода съёмки; NULL — сняли за один месяц (year, month) */ `
+  ALTER TABLE rolls ADD COLUMN end_year INTEGER;
+  ALTER TABLE rolls ADD COLUMN end_month INTEGER CHECK (end_month BETWEEN 1 AND 12);
+  `,
+  /* 11: доступ «видна всем» убран (страницы автора в меню больше нет): такие плёнки — «по ссылке», их ссылки работают */ `
+  UPDATE rolls SET visibility = 'link' WHERE visibility = 'public';
+  `,
 ];
 
 export function migrate(db: Database.Database) {

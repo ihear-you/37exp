@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useOptimistic, useRef, useState } from "react";
 import {
   ISO_VALUES,
-  MONTHS,
   VISIBILITIES,
   filmLabel,
   findFilm,
   formatLabel,
   makeTitle,
+  periodLabel,
   rollView,
   type Camera,
   type Film,
@@ -21,7 +21,7 @@ import {
   type Visibility,
 } from "@/lib/catalog";
 import { deleteFrameAction, deleteRollAction, rotateFrameAction, saveRollAction, setRollVisibilityAction } from "../rolls/[id]/actions";
-import { control, Select } from "./fields";
+import { control, Field, PeriodFields, Select } from "./fields";
 import { LinkIcon } from "./icons";
 import Masonry from "./Masonry";
 import RollDescription from "./RollDescription";
@@ -66,7 +66,7 @@ export default function RollDetail({
   const isoDiffers = film.iso && current.iso && film.iso !== current.iso;
   const facts = [
     // месяц с заглавной: строка начинается с даты («Октябрь 2026»)
-    `${MONTHS[current.month - 1].replace(/^./, (c) => c.toUpperCase())} ${current.year}`,
+    periodLabel(current, true),
     view.camera,
     !heading.includes(view.film) && view.film,
     // ISO, совпадающий с плёнкой («Kodak Gold 200» снята на 200), уже понятен из названия
@@ -190,16 +190,13 @@ function EditPanel({
   onCancel: () => void;
   onDelete: () => Promise<void>;
 }) {
-  const [draft, setDraft] = useState({ ...current, title: current.title ?? "" });
+  const [draft, setDraft] = useState({ ...current, title: current.title ?? "", endMonth: current.endMonth ?? null, endYear: current.endYear ?? null });
   // удаление в два шага: сначала вопрос, потом само удаление
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const set = <K extends keyof typeof draft>(k: K, v: (typeof draft)[K]) => setDraft((d) => ({ ...d, [k]: v }));
 
-  const auto = makeTitle(findFilm(draft.filmId, films), draft.month, draft.year, draft.iso);
-  const thisYear = new Date().getFullYear();
-  const years = Array.from({ length: 12 }, (_, i) => Math.max(thisYear, draft.year) - i);
-  if (!years.includes(draft.year)) years.push(draft.year);
+  const auto = makeTitle(findFilm(draft.filmId, films), draft, draft.iso);
   const isos = ISO_VALUES.includes(draft.iso ?? 0) || draft.iso === null ? ISO_VALUES : [...ISO_VALUES, draft.iso!].sort((a, b) => a - b);
 
   // Esc закрывает панель без сохранения
@@ -222,6 +219,8 @@ function EditPanel({
       format: draft.format,
       month: draft.month,
       year: draft.year,
+      endMonth: draft.endMonth,
+      endYear: draft.endYear,
     });
   };
 
@@ -252,7 +251,8 @@ function EditPanel({
         <div className="col-span-2">
         <Field label="Камера">
           <Select value={draft.cameraId} onChange={(e) => set("cameraId", e.target.value)}>
-            {!cameras.some((c) => c.id === draft.cameraId) && <option value={draft.cameraId}>{draft.cameraId}</option>}
+            <option value="">не указана</option>
+            {draft.cameraId && !cameras.some((c) => c.id === draft.cameraId) && <option value={draft.cameraId}>{draft.cameraId}</option>}
             {cameras.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -277,25 +277,8 @@ function EditPanel({
             ))}
           </Select>
         </Field>
-        <Field label="Месяц начала съёмки">
-          <Select value={draft.month} onChange={(e) => set("month", Number(e.target.value))}>
-            {MONTHS.map((m, i) => (
-              <option key={m} value={i + 1}>
-                {m}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Год">
-          <Select value={draft.year} onChange={(e) => set("year", Number(e.target.value))}>
-            {years.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </Select>
-        </Field>
       </div>
+      <PeriodFields value={draft} onChange={(p) => setDraft((d) => ({ ...d, ...p }))} />
 
       <div className="sticky bottom-0 -mx-5 bg-paper-light px-5 pb-5 pt-3">
         {confirming ? (
@@ -426,13 +409,4 @@ function AccessPanel({
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-ink-faint">{label}</span>
-      <label className="block">{children}</label>
-      {hint && <p className="mt-1 text-xs text-ink-faint">{hint}</p>}
-    </div>
-  );
-}
 

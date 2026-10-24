@@ -1,18 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { signOutAction } from "../login/actions";
+import { signOutAction } from "../auth/actions";
 
 export interface MenuUser {
   name: string;
-  handle: string;
   avatarUrl: string | null;
 }
 
-/** Справа в шапке: аватар с меню (моя страница, выход) или «Войти», если не вошли. */
-export default function UserMenu({ user }: { user: MenuUser | null }) {
+/** Справа в шапке: аватар с меню (имя, выход) или «Войти», если не вошли. */
+export default function UserMenu({ user, signIn }: { user: MenuUser | null; signIn: { id: string; label: string } | null }) {
   const path = usePathname();
   // меню открыто на конкретной странице: при переходе на другую оно само считается закрытым
   const [openAt, setOpenAt] = useState<string | null>(null);
@@ -33,14 +31,16 @@ export default function UserMenu({ user }: { user: MenuUser | null }) {
   }, [open]);
 
   if (!user) {
-    if (path === "/login") return null;
+    if (!signIn) return null;
+    // сразу к сервису входа и обратно на эту же страницу (например, на плёнку, открытую по ссылке).
+    // Обычная ссылка, не Link: маршрут ставит cookie и ведёт на другой сайт, предзагружать его нельзя
     return (
-      <Link
-        href="/login"
+      <a
+        href={`/api/auth/${signIn.id}?next=${encodeURIComponent(path)}`}
         className="rounded-control bg-paper-deep px-3.5 py-2.5 text-[11px] uppercase tracking-wider text-ink-soft transition-colors hover:text-ink"
       >
-        Войти
-      </Link>
+        Войти через {signIn.label}
+      </a>
     );
   }
 
@@ -71,13 +71,6 @@ export default function UserMenu({ user }: { user: MenuUser | null }) {
           className="absolute right-0 top-full z-40 mt-2 w-60 overflow-hidden rounded-[16px] bg-paper-light py-1 shadow-[0_8px_24px_rgba(0,0,0,0.5)] ring-1 ring-line"
         >
           <p className="truncate px-4 pb-2 pt-3 text-sm text-ink">{user.name}</p>
-          <Link
-            href={`/u/${user.handle}`}
-            role="menuitem"
-            className="block px-4 py-2.5 text-sm text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
-          >
-            Моя страница
-          </Link>
           <form action={signOutAction}>
             <button
               type="submit"

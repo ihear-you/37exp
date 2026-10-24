@@ -8,6 +8,8 @@ export interface FolderGuess {
   iso?: number;
   year?: number;
   month?: number;
+  /** «май-июнь»: плёнку снимали несколько месяцев, это последний */
+  endMonth?: number;
 }
 
 const MONTH_WORDS: [RegExp, number][] = [
@@ -33,7 +35,9 @@ export function parseFolderName(name: string, films: readonly Film[]): FolderGue
   // плёнка: ищем самое длинное совпавшее написание (Lucky200 = Lucky Color 200)
   let bestLen = 0;
   for (const film of films) {
-    for (const syn of film.synonyms) {
+    // своя плёнка пользователя написаний не имеет: ищем её по самому названию
+    const own = film.name.toLowerCase().replace(/ё/g, "е").replace(/[^a-z0-9а-я]/g, "");
+    for (const syn of [...film.synonyms, own]) {
       if (syn.length > bestLen && squashed.includes(syn)) {
         bestLen = syn.length;
         guess.filmId = film.id;
@@ -53,8 +57,12 @@ export function parseFolderName(name: string, films: readonly Film[]): FolderGue
   } else {
     const year = lower.match(/(?<!\d)(20\d{2})(?!\d)/);
     if (year) guess.year = Number(year[1]);
-    const word = MONTH_WORDS.find(([re]) => re.test(lower));
-    if (word) guess.month = word[1];
+    // месяцы словами по порядку в названии: первый — начало, последний — конец съёмки
+    const words = MONTH_WORDS.map(([re, m]) => ({ m, at: lower.search(re) }))
+      .filter((w) => w.at >= 0)
+      .sort((a, b) => a.at - b.at);
+    if (words.length) guess.month = words[0].m;
+    if (words.length > 1 && words.at(-1)!.m !== words[0].m) guess.endMonth = words.at(-1)!.m;
   }
 
   // ISO: явное «iso400», иначе число из списка, иначе заявленное на найденной плёнке

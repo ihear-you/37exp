@@ -4,6 +4,7 @@ import "./globals.css";
 import SiteHeader from "./components/SiteHeader";
 import BottomBarNav from "./components/BottomBarNav";
 import UploadIndicator from "./components/UploadIndicator";
+import { configuredProviders } from "@/lib/auth/providers";
 import { getViewer } from "@/lib/auth/session";
 import { getMyCounts } from "@/lib/db";
 
@@ -35,18 +36,20 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // кадры и плёнки в шапке: свои у вошедшего, а зритель без входа ничего своего не имеет
   const viewer = await getViewer();
   const counts = viewer ? await getMyCounts(viewer.id) : { rolls: 0, frames: 0 };
-  const hasFrames = counts.frames > 0;
+  // архив есть, если есть хоть одна плёнка, пусть и без кадров: тогда навигация видна (лента покажет заглушку)
+  const hasArchive = counts.rolls > 0 || counts.frames > 0;
 
   return (
     <html lang="ru" className={`${plex.variable} ${anton.variable}`}>
       <body className="min-h-dvh flex flex-col">
         <SiteHeader
-          hasFrames={hasFrames}
+          hasArchive={hasArchive}
           rollCount={counts.rolls}
-          user={viewer ? { name: viewer.name, handle: viewer.handle, avatarUrl: viewer.avatarUrl } : null}
+          user={viewer ? { name: viewer.name, avatarUrl: viewer.avatarUrl } : null}
+          signIn={viewer ? null : (configuredProviders()[0] ?? null)}
         />
         <main className="flex-1">{children}</main>
-        <BottomBarNav hasFrames={hasFrames} rollCount={counts.rolls} />
+        <BottomBarNav hasArchive={hasArchive} rollCount={counts.rolls} />
         {/* ход фоновых загрузок: из формы можно уйти, загрузка продолжится (lib/upload-queue.ts) */}
         <UploadIndicator />
       </body>
