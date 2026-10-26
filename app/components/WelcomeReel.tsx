@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { FRAMES } from "@/lib/catalog";
 import { mulberry32, shuffled } from "@/lib/rand";
-import type { EditorialPhoto } from "@/lib/unsplash";
+import type { EditorialPhoto } from "@/lib/editorial";
 import { UploadIcon } from "./icons";
 
 // Пустая лента: хаотичный коллаж фотографий внахлёст, без сетки и без поворота, размазанный

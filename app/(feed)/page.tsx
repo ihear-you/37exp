@@ -4,7 +4,7 @@ import WelcomeReel from "../components/WelcomeReel";
 import { configuredProviders } from "@/lib/auth/providers";
 import { getViewer } from "@/lib/auth/session";
 import { getMyFeedFrames, getMyRollViews } from "@/lib/db";
-import { getEditorialPhotos } from "@/lib/unsplash";
+import { getEditorialPhotos } from "@/lib/editorial";
 
 // Почему не удался вход: сервис входа возвращает сюда с ?login=<причина> (app/api/auth/[provider]/callback)
 const LOGIN_ERRORS: Record<string, string> = {

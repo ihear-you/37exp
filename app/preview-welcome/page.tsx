@@ -1,6 +1,6 @@
 import WelcomeReel from "../components/WelcomeReel";
 import { configuredProviders } from "@/lib/auth/providers";
-import { getEditorialPhotos } from "@/lib/unsplash";
+import { getEditorialPhotos } from "@/lib/editorial";
 
 /** Служебная страница: посмотреть анимацию пустой ленты, не опустошая настоящую. Дев-инструмент.
  * /preview-welcome — как видит вошедший с пустым архивом, /preview-welcome?guest — как видит гость. */

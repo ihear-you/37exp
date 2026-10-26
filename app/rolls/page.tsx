@@ -5,7 +5,7 @@ import RollsBrowser, { type RollCard } from "../components/RollsBrowser";
 import { signInHref } from "@/lib/auth/providers";
 import { getViewer } from "@/lib/auth/session";
 import { getMyRollPreviews, getMyRollViews } from "@/lib/db";
-import { getFanPhotos } from "@/lib/unsplash";
+import { getFanPhotos } from "@/lib/editorial";
 
 export const metadata: Metadata = { title: "Папки · [37exp]" };
 

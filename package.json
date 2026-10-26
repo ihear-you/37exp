@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "import": "node scripts/import-photos.mjs",
-    "db:reset": "node scripts/db-reset.mjs"
+    "db:reset": "node scripts/db-reset.mjs",
+    "editorial": "node --env-file=.env.local scripts/editorial-photos.mjs"
   },
   "dependencies": {
     "arctic": "^3.7.0",

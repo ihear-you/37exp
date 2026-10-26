@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { signInHref } from "@/lib/auth/providers";
 import { requireUser } from "@/lib/auth/session";
 import { getMyCameras, getMyFilms, getMyRollViews } from "@/lib/db";
-import { getFanPhotos } from "@/lib/unsplash";
+import { getFanPhotos } from "@/lib/editorial";
 import UploadFlow from "../components/UploadFlow";
 
 export const metadata: Metadata = { title: "Загрузка · [37exp]" };

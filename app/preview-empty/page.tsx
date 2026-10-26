@@ -1,5 +1,5 @@
 import UploadSources from "../components/UploadSources";
-import { getFanPhotos } from "@/lib/unsplash";
+import { getFanPhotos } from "@/lib/editorial";
 
 /** Служебная страница: посмотреть папки без единой плёнки (первый вход), не опустошая настоящий архив. Дев-инструмент. */
 export default async function PreviewEmptyPage() {
