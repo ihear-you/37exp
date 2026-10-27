@@ -431,16 +431,31 @@ export function finalizeFrame(userId: number, frameId: string, f: Omit<NewFrame,
 
 // ── загрузки с устройства (целиком или никак) ──
 
-export function insertUpload(id: string, userId: number, rollId: number, newRoll: boolean, expected: number) {
+/** firstIdx: первый из `expected` номеров кадров, зарезервированных под эту загрузку */
+export function insertUpload(id: string, userId: number, rollId: number, newRoll: boolean, expected: number, firstIdx: number) {
   getDb()
-    .prepare("INSERT INTO uploads (id, user_id, roll_id, new_roll, expected, touched_at) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(id, userId, rollId, newRoll ? 1 : 0, expected, Math.floor(Date.now() / 1000));
+    .prepare("INSERT INTO uploads (id, user_id, roll_id, new_roll, expected, first_idx, touched_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(id, userId, rollId, newRoll ? 1 : 0, expected, firstIdx, Math.floor(Date.now() / 1000));
+}
+
+/** Сколько у пользователя незаконченных загрузок (с устройства и импортов) */
+export function countUploads(userId: number): number {
+  return (getDb().prepare("SELECT COUNT(*) AS n FROM uploads WHERE user_id = ?").get(userId) as { n: number }).n;
+}
+
+export interface UploadSlot {
+  rollId: number;
+  /** Номера кадров этой загрузки: firstIdx … firstIdx + expected − 1. firstIdx null — загрузка старше миграции 12 */
+  firstIdx: number | null;
+  expected: number;
 }
 
 /** Незаконченная загрузка пользователя (и отметка «ещё жива»). null, если её нет: закончена или отменена */
-export function touchUpload(userId: number, id: string): { rollId: number } | null {
+export function touchUpload(userId: number, id: string): UploadSlot | null {
   const db = getDb();
-  const row = db.prepare("SELECT roll_id AS rollId FROM uploads WHERE id = ? AND user_id = ?").get(id, userId) as { rollId: number } | undefined;
+  const row = db
+    .prepare("SELECT roll_id AS rollId, first_idx AS firstIdx, expected FROM uploads WHERE id = ? AND user_id = ?")
+    .get(id, userId) as UploadSlot | undefined;
   if (row) db.prepare("UPDATE uploads SET touched_at = ? WHERE id = ?").run(Math.floor(Date.now() / 1000), id);
   return row ?? null;
 }

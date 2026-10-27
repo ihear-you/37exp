@@ -7,6 +7,7 @@ import {
   createCamera,
   createFilm,
   createImport,
+  countMyOpenUploads,
   createRoll,
   getMyFilms,
   getUsedBytes,
@@ -16,10 +17,12 @@ import {
 import { runImport } from "@/lib/import/runner";
 import { ImportError, listYandex, normalizeYandexUrl } from "@/lib/import/yandex";
 import { MAX_FRAMES_PER_UPLOAD, USER_QUOTA_BYTES } from "@/lib/photos/limits";
-import { startUpload } from "@/lib/uploads";
+import { MAX_OPEN_UPLOADS, startUpload } from "@/lib/uploads";
 
 // Серверные действия страницы загрузки. Кадры с устройства принимает app/api/uploads/[id]/parts и /frames,
 // импорт по ссылке (Яндекс Диск) идёт в фоне на сервере: lib/import, состояние отдаёт app/api/imports/[id].
+
+const TOO_MANY_UPLOADS = `Сейчас идёт ${MAX_OPEN_UPLOADS} загрузок: дождитесь, пока одна закончится`;
 
 const isInt = (n: unknown, min: number, max: number) => Number.isInteger(n) && (n as number) >= min && (n as number) <= max;
 
@@ -97,6 +100,7 @@ export async function startUploadAction(input: StartUploadInput): Promise<StartU
   const user = await requireUser();
   if (!user) return { ok: false, error: "Войдите, чтобы загружать" };
   if (!isInt(input.count, 1, MAX_FRAMES_PER_UPLOAD)) return { ok: false, error: `За один раз можно загрузить от 1 до ${MAX_FRAMES_PER_UPLOAD} кадров` };
+  if ((await countMyOpenUploads(user.id)) >= MAX_OPEN_UPLOADS) return { ok: false, error: TOO_MANY_UPLOADS };
   if ((await getUsedBytes(user.id)) + (Number(input.totalBytes) || 0) > USER_QUOTA_BYTES) {
     return { ok: false, error: "Не хватит места в вашем архиве (лимит на пользователя)" };
   }
@@ -107,7 +111,7 @@ export async function startUploadAction(input: StartUploadInput): Promise<StartU
 
   const firstIdx = await reserveFrameSlots(user.id, rollId, input.count);
   if (firstIdx === null) return { ok: false, error: "Такой плёнки нет" };
-  const uploadId = startUpload(user.id, rollId, input.rollId === null, input.count);
+  const uploadId = startUpload(user.id, rollId, input.rollId === null, input.count, firstIdx);
 
   revalidatePath("/", "layout");
   return { ok: true, rollId, firstIdx, uploadId };
@@ -179,6 +183,7 @@ export async function startImportAction(input: StartImportInput): Promise<StartI
   if (!user) return { ok: false, error: "Войдите, чтобы загружать" };
   const key = typeof input.url === "string" ? normalizeYandexUrl(input.url) : null;
   if (!key) return { ok: false, error: IMPORT_ERRORS.link };
+  if ((await countMyOpenUploads(user.id)) >= MAX_OPEN_UPLOADS) return { ok: false, error: TOO_MANY_UPLOADS };
 
   let files;
   try {
@@ -205,7 +210,7 @@ export async function startImportAction(input: StartImportInput): Promise<StartI
     files.map((f, n) => ({ name: f.name, path: f.path, size: f.size, idx: firstIdx + n, preview: f.preview })),
   );
   // целиком или никак, как загрузка с устройства: ушли со страницы до конца — импорт останавливается, его кадры стираются
-  startUpload(user.id, target.rollId, input.rollId === null, files.length, importId);
+  startUpload(user.id, target.rollId, input.rollId === null, files.length, firstIdx, importId);
   runImport(importId);
 
   revalidatePath("/", "layout");

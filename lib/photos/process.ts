@@ -1,11 +1,15 @@
 import sharp from "sharp";
+import { withPhotoSlot } from "./queue";
 
 // Обработка загруженного кадра: поворот по EXIF, копии для ленты и для просмотра на весь экран,
 // цвет и яркость для ленты. Те же размеры и качество, что у scripts/import-photos.mjs.
+// Работа тяжёлая, поэтому идёт через общую очередь сервера (queue.ts).
 
 const LONG_FEED = 900;
 const LONG_FULL = 2000;
-const MAX_PIXELS = 400_000_000; // защита от «бомб»: огромных по размеру картинок
+/** Защита от «бомб» — огромных по размеру картинок — и от нехватки памяти: скан 35 мм около 24 млн пикселей,
+ *  крупный скан 6×9 около 120 млн */
+export const MAX_PIXELS = 200_000_000;
 
 export interface Processed {
   /** Формат исходника: jpeg, png, tiff, webp… */
@@ -20,8 +24,12 @@ export interface Processed {
   color: string;
 }
 
-/** Кидает ошибку, если файл не картинка или не читается */
-export async function processPhoto(input: Buffer): Promise<Processed> {
+/** Кидает ошибку, если файл не картинка или не читается. label — для журнала */
+export function processPhoto(input: Buffer, label: string): Promise<Processed> {
+  return withPhotoSlot(label, () => makeRenditions(input));
+}
+
+async function makeRenditions(input: Buffer): Promise<Processed> {
   // поворот по EXIF применяем один раз, дальше работаем с уже «прямой» картинкой
   // Поворот по EXIF и уменьшение идут одной цепочкой для каждой копии: так оригинал не пересохраняется
   // целиком в промежуточный файл (на сервере это заметная доля времени), а результат тот же.

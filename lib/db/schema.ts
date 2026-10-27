@@ -185,6 +185,10 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
   /* 11: доступ «видна всем» убран (страницы автора в меню больше нет): такие плёнки — «по ссылке», их ссылки работают */ `
   UPDATE rolls SET visibility = 'link' WHERE visibility = 'public';
   `,
+  /* 12: загрузка принимает только свои номера кадров (first_idx … first_idx + expected − 1), иначе кусочками с любыми
+     номерами можно было забить диск. NULL — загрузка начата до этой версии: номера не проверяются */ `
+  ALTER TABLE uploads ADD COLUMN first_idx INTEGER;
+  `,
 ];
 
 export function migrate(db: Database.Database) {
