@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ChevronIcon } from "./icons";
+import { ArrowLeftIcon } from "./icons";
 
+/** «Назад»: квадратная кнопка со стрелкой 24 px в стиле фильтров «Папок» (тёмная заливка, приглушённая стрелка) */
 export default function BackButton() {
   const router = useRouter();
 
@@ -10,10 +11,11 @@ export default function BackButton() {
     <button
       type="button"
       onClick={() => router.back()}
-      className="-ml-2 flex items-center gap-1 rounded-control px-2 py-1 text-[11px] uppercase tracking-wider text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
+      aria-label="Назад"
+      title="Назад"
+      className="grid size-10 place-items-center rounded-control bg-paper-deep text-ink-faint transition-colors hover:text-ink-soft"
     >
-      <ChevronIcon dir="left" width={13} height={13} />
-      Назад
+      <ArrowLeftIcon width={24} height={24} />
     </button>
   );
 }

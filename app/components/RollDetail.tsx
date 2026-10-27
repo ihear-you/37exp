@@ -157,7 +157,7 @@ export default function RollDetail({
           )}
         </div>
 
-        <h1 className="mt-3 text-[26px] leading-[1.2] md:text-[40px]">{heading}</h1>
+        <h1 className="font-display mt-3 text-[26px] leading-[1.2] md:text-[40px]">{heading}</h1>
         <p className="mt-2 text-sm text-ink-soft md:text-base">{facts.join(" · ")}</p>
         {current.description && <RollDescription text={current.description} />}
       </header>

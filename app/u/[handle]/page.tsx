@@ -23,7 +23,7 @@ export default async function AuthorPage({ params }: PageProps<"/u/[handle]">) {
 
   return (
     <div className="mx-auto w-full max-w-[1600px] px-3 md:px-5">
-      <h1 className="pt-6 text-[26px] leading-tight md:pt-8 md:text-[36px]">{profile.user.name}</h1>
+      <h1 className="font-display pt-6 text-[26px] leading-tight md:pt-8 md:text-[36px]">{profile.user.name}</h1>
       {rolls.length > 0 ? (
         <RollsBrowser rolls={rolls} />
       ) : (

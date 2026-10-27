@@ -20,7 +20,9 @@ export default function RollDescription({ text }: { text: string }) {
   }, [text, expanded]);
 
   return (
-    <div className="mt-3 max-w-prose">
+    // отступ подобран так, чтобы видимое расстояние до описания совпало с расстоянием от заголовка до строки
+    // с данными плёнки (RollDetail.tsx): у строк разная высота, поэтому одинаковые mt дали бы разные просветы
+    <div className="mt-2 max-w-prose md:mt-[11px]">
       <p ref={ref} className={`text-[15px] leading-relaxed text-ink-soft ${expanded ? "" : "line-clamp-3"}`}>
         {text}
       </p>

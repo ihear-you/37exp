@@ -10,7 +10,6 @@ export interface RollCard extends RollView {
   strip: { id: string; w: number; h: number; color: string; v?: number }[];
 }
 
-type Sort = "new" | "old";
 
 interface Option {
   value: string;
@@ -41,7 +40,6 @@ export default function RollsBrowser({ rolls }: { rolls: RollCard[] }) {
   const [film, setFilm] = useState("");
   const [year, setYear] = useState("");
   const [month, setMonth] = useState("");
-  const [sort, setSort] = useState<Sort>("new");
 
   const cameras = useMemo(() => options(rolls, (r) => (r.cameraId ? [r.cameraId, r.camera] : null), (a, b) => a.label.localeCompare(b.label, "ru")), [rolls]);
   const films = useMemo(() => options(rolls, (r) => [r.filmId, r.film], (a, b) => a.label.localeCompare(b.label, "ru")), [rolls]);
@@ -59,8 +57,9 @@ export default function RollsBrowser({ rolls }: { rolls: RollCard[] }) {
         (!year || r.year === Number(year)) &&
         (!month || r.month === Number(month)),
     );
-    return list.sort((a, b) => (sort === "new" ? date(b) - date(a) : date(a) - date(b)));
-  }, [rolls, camera, film, year, month, sort]);
+    // всегда сначала новые: переключателя порядка нет
+    return list.sort((a, b) => date(b) - date(a));
+  }, [rolls, camera, film, year, month]);
 
   const activeCount = [camera, film, year, month].filter(Boolean).length;
   const reset = () => {
@@ -85,17 +84,6 @@ export default function RollsBrowser({ rolls }: { rolls: RollCard[] }) {
               Сбросить все
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setSort(sort === "new" ? "old" : "new")}
-            className={`${PILL} ${PILL_IDLE} ml-auto gap-1.5`}
-            aria-label="Сортировка по дате"
-          >
-            {sort === "new" ? "Сначала новые" : "Сначала старые"}
-            <svg width="10" height="12" viewBox="0 0 10 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className={sort === "old" ? "rotate-180" : ""}>
-              <path d="M5 1v10M1.5 7.5L5 11l3.5-3.5" />
-            </svg>
-          </button>
         </div>
       </div>
 
@@ -134,10 +122,6 @@ function RollCardView({ roll }: { roll: RollCard }) {
     </Link>
   );
 }
-
-/** Кнопки как вкладки в шапке: плашка без обводки, капс, заполненная при выборе */
-const PILL = "inline-flex items-center rounded-control px-3.5 py-2 text-[11px] uppercase tracking-wider transition-colors";
-const PILL_IDLE = "bg-paper-deep text-ink-faint hover:text-ink-soft";
 
 /** Кнопка-фильтр с выпадающим списком значений. Выбрано значение: кнопка заполняется («Год: 2026»),
     рядом крестик, сбрасывающий только этот фильтр. Повторный клик по выбранному значению тоже сбрасывает */

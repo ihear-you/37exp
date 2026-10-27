@@ -60,7 +60,7 @@ export default function Feed({
   if (visit && ordered.length === 0) {
     return (
       <div className="mx-auto flex min-h-[60vh] w-full max-w-md flex-col items-center justify-center px-3 text-center">
-        <p className="text-lg text-ink">Пока нет загруженных фотографий</p>
+        <p className="font-display text-2xl text-ink">Пока нет загруженных фотографий</p>
         <p className="mt-2 text-sm text-ink-soft">Загрузите плёнку, и кадры появятся здесь</p>
       </div>
     );

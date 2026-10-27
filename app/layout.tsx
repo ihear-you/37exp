@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Anton, IBM_Plex_Sans } from "next/font/google";
+import { Anton, Inter_Tight } from "next/font/google";
 import "./globals.css";
 import SiteHeader from "./components/SiteHeader";
 import BottomBarNav from "./components/BottomBarNav";
@@ -8,19 +8,20 @@ import { configuredProviders } from "@/lib/auth/providers";
 import { getViewer } from "@/lib/auth/session";
 import { getMyCounts } from "@/lib/db";
 
-// IBM Plex Sans: единственный шрифт текста на сайте — интерфейс, заголовки, названия плёнок.
-const plex = IBM_Plex_Sans({
-  variable: "--font-plex",
-  subsets: ["latin", "cyrillic"],
-  weight: "400",
-});
-
 // Anton: только логотип «[37exp]». Только латиница и цифры — кириллицы в этом шрифте нет,
 // поэтому для русских заголовков (названия плёнок и т.д.) он не используется.
 const anton = Anton({
   variable: "--font-anton",
   subsets: ["latin"],
   weight: "400",
+});
+
+// Inter Tight: весь текст сайта (400) и заголовки экранов (500, класс font-display в globals.css) —
+// плотный швейцарский гротеск
+const interTight = Inter_Tight({
+  variable: "--font-inter-tight",
+  subsets: ["latin", "cyrillic"],
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
@@ -40,7 +41,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const hasArchive = counts.rolls > 0 || counts.frames > 0;
 
   return (
-    <html lang="ru" className={`${plex.variable} ${anton.variable}`}>
+    <html lang="ru" className={`${anton.variable} ${interTight.variable}`}>
       <body className="min-h-dvh flex flex-col">
         <SiteHeader
           hasArchive={hasArchive}

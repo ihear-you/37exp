@@ -37,7 +37,7 @@
   --color-line: var(--line);
   --color-accent: var(--accent);
   --color-accent-vivid: var(--accent-vivid);
-  --font-sans: var(--font-plex), -apple-system, "Segoe UI", sans-serif;
+  --font-sans: var(--font-inter-tight), -apple-system, "Segoe UI", sans-serif;
   /* только логотип: плотный чёрный гротеск, латиница и цифры */
   --font-logo: var(--font-anton), Impact, sans-serif;
   --radius-frame: var(--round-frame);
@@ -58,6 +58,16 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* У Inter Tight буквы стоят теснее обычного: обычный текст разряжен на 4% от его размера, заголовки (.font-display)
+   — на 2%. Задано каждому элементу, а не только body: em, унаследованный от body, превращается в пиксели от 16 px.
+   В слое base, чтобы классы tracking-* (заглавные подписи, логотип) были сильнее и остались как есть */
+@layer base {
+  body,
+  body * {
+    letter-spacing: 0.04em;
+  }
+}
+
 ::selection {
   background: rgba(168, 72, 42, 0.2);
 }
@@ -69,6 +79,13 @@ body {
 
 .font-logo {
   font-family: var(--font-logo);
+}
+
+/* заголовки экранов: тот же шрифт, что текст, Medium; буквы разряжены меньше, чем в мелком тексте (+2%) */
+.font-display {
+  font-family: var(--font-inter-tight), sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
 /* прокручиваемая строка без полосы (фильтры на телефоне) */

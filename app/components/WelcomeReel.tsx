@@ -150,8 +150,7 @@ export default function WelcomeReel({
       >
         {signIn ? (
           <>
-            <h1 className="text-xl text-ink sm:text-2xl">36 кадров и ещё один</h1>
-            <p className="mt-2 max-w-sm text-ink-soft">Архив для плёнок, которые вы уже проявили</p>
+            <h1 className="font-display text-2xl text-ink sm:text-[28px]">Ваш архив плёночных кадров</h1>
             <div className="mt-5 flex flex-wrap justify-center gap-3">
               {/* обычные ссылки, не Link: маршрут ставит cookie и ведёт на другой сайт, предзагружать его нельзя */}
               {signIn.map((p) => (
@@ -168,7 +167,7 @@ export default function WelcomeReel({
           </>
         ) : (
           <>
-            <h1 className="text-xl text-ink sm:text-2xl">Архив пока пуст</h1>
+            <h1 className="font-display text-2xl text-ink sm:text-3xl">Архив пока пуст</h1>
             <p className="mt-2 max-w-sm text-ink-soft">Загрузите первую плёнку, и здесь появится лента</p>
             <Link href="/upload" className={`mt-5 ${cta}`}>
               <UploadIcon width={16} height={16} />

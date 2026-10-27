@@ -255,7 +255,7 @@ export default function UploadFlow({
 
       {/* ── ход загрузки ── */}
       <section aria-label="Загрузка" className="min-w-0 lg:col-start-1 lg:row-start-1">
-        <h1 className="text-[26px] leading-tight md:text-[36px]">Загрузка плёнки</h1>
+        <h1 className="font-display text-[26px] leading-tight md:text-[36px]">Загрузка плёнки</h1>
         {source?.kind === "link" && (
           <p className="mt-2 text-sm text-ink-soft">
             Яндекс Диск, «{source.folder}»
@@ -496,7 +496,7 @@ function RollCard({
 
   return (
     <form onSubmit={save} className="space-y-4 rounded-[20px] bg-paper-light p-5 shadow-[var(--card-ring)]" aria-label="Что это за плёнка?">
-      <h2 className="text-xl leading-tight">Что это за плёнка?</h2>
+      <h2 className="font-display text-xl leading-tight">Что это за плёнка?</h2>
 
       <Field label="Название папки">
         <input className={control} value={title} placeholder={auto} onChange={(e) => setTitle(e.target.value)} />

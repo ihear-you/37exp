@@ -138,3 +138,12 @@ export function CalendarIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** Стрелка влево с хвостом: кнопка «Назад» */
+export function ArrowLeftIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M19.5 12h-15M10.5 6l-6 6 6 6" />
+    </svg>
+  );
+}

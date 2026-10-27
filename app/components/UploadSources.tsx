@@ -5,11 +5,16 @@ import { useEffect, useRef, useState } from "react";
 import { collectDropped, handOffUpload, isImageFile, type UploadHandoff } from "@/lib/upload-handoff";
 import { previewImportAction } from "../upload/actions";
 import { control } from "./fields";
-import { LinkIcon, UploadIcon } from "./icons";
+import { UploadIcon } from "./icons";
 import PhotoFan, { type FanPic } from "./PhotoFan";
 
+// Плитки устроены одинаково: значок, заголовок, подпись и сразу под ними действие (кнопка или поле ссылки),
+// всё по центру плитки. Значок и строка действия в обеих одной высоты, поэтому всё стоит на одном уровне
 const tile =
-  "flex min-h-48 flex-col items-center justify-center rounded-[20px] bg-paper-light p-6 text-center shadow-[var(--card-ring)] transition-shadow md:min-h-72 md:p-8";
+  "relative flex flex-col items-center justify-center rounded-[20px] bg-paper-light p-5 text-center shadow-[var(--card-ring)] transition-shadow md:min-h-72 md:p-8";
+const action = "mt-5 flex min-h-10 items-center";
+const badge = "grid size-10 place-items-center";
+const primary = "rounded-control bg-ink px-5 py-2 text-sm text-paper transition-opacity hover:opacity-85 disabled:opacity-40";
 
 /**
  * Первый шаг загрузки: два способа взять кадры — с устройства (выбрать или перетащить файлы или папку) и по ссылке
@@ -27,6 +32,10 @@ export default function UploadSources({
   const router = useRouter();
   const [drag, setDrag] = useState(false);
   const folderInput = useRef<HTMLInputElement>(null);
+  const filesInput = useRef<HTMLInputElement>(null);
+  /** На компьютере «Загрузить» спрашивает, что выбрать: фото или папку целиком (папку умеют отдавать только они) */
+  const [menu, setMenu] = useState(false);
+  const menuBox = useRef<HTMLDivElement>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,6 +44,24 @@ export default function UploadSources({
   useEffect(() => {
     folderInput.current?.setAttribute("webkitdirectory", "");
   }, []);
+
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (e: PointerEvent) => !menuBox.current?.contains(e.target as Node) && setMenu(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  const chooseFiles = () => {
+    // на телефоне папку не выбрать: сразу фото
+    if (window.matchMedia("(min-width: 768px)").matches) setMenu((v) => !v);
+    else filesInput.current?.click();
+  };
 
   const pick = (picked: UploadHandoff) => {
     if (onPick) return onPick(picked);
@@ -81,16 +108,17 @@ export default function UploadSources({
   };
 
   return (
-    <div className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-4xl flex-col justify-center pb-28 pt-6 md:pb-16">
+    <div className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-4xl flex-col justify-center pb-28 pt-2 md:pb-16 md:pt-6">
+      {/* на телефоне веер меньше: обе плитки должны поместиться на экран над нижним баром */}
       {photos.length > 0 && (
-        <div className="mx-auto mb-6 w-full max-w-60 md:mb-8 md:max-w-80">
+        <div className="mx-auto mb-4 w-full max-w-40 md:mb-8 md:max-w-80">
           <PhotoFan pics={photos} />
         </div>
       )}
-      <h1 className="text-center text-[26px] leading-tight md:text-[36px]">Загрузите плёнку</h1>
+      <h1 className="font-display text-center text-[26px] leading-tight md:text-[36px]">Загрузите плёнку</h1>
 
-      <div className="mt-8 grid gap-3 md:grid-cols-2 md:gap-4">
-        {/* плитка целиком открывает выбор файлов, на неё же можно бросить файлы или папку; «выбрать папку» — кнопка под ней */}
+      <div className="mt-5 grid gap-3 md:mt-8 md:grid-cols-2 md:gap-4">
+        {/* на плитку можно бросить файлы или папку; «Загрузить» — выбрать фото или папку */}
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -98,25 +126,46 @@ export default function UploadSources({
           }}
           onDragLeave={() => setDrag(false)}
           onDrop={onDrop}
-          className={`${tile} relative hover:shadow-[var(--card-ring-hover)] ${drag ? "shadow-[var(--card-ring-hover)] ring-2 ring-accent" : ""}`}
+          className={`${tile} ${drag ? "shadow-[var(--card-ring-hover)] ring-2 ring-accent" : ""}`}
         >
-          <label className="flex cursor-pointer flex-col items-center after:absolute after:inset-0 after:rounded-[20px]">
-            <UploadIcon width={32} height={32} className="text-ink-soft" />
-            <span className="mt-4 text-lg">С устройства</span>
-            <span className="mt-1 max-w-xs text-sm text-ink-soft">Сканы плёнки с компьютера или телефона</span>
-            <input type="file" multiple accept="image/*" className="sr-only" onChange={(e) => onFiles(e, false)} />
-          </label>
-          {/* папку целиком умеют отдавать только браузеры на компьютере */}
-          <button
-            type="button"
-            onClick={() => folderInput.current?.click()}
-            className="relative z-10 mt-4 hidden text-sm text-ink-faint underline decoration-ink-faint/40 underline-offset-4 transition-colors hover:text-ink md:block"
-          >
-            или выбрать папку целиком
-          </button>
+          <span className={badge}>
+            <UploadIcon width={30} height={30} className="text-ink-soft" />
+          </span>
+          <span className="mt-4 text-lg">С устройства</span>
+          <span className="mt-1 max-w-xs text-sm text-ink-soft">Отдельные фото или папку целиком</span>
+          <div ref={menuBox} className={`${action} relative`}>
+            <button type="button" aria-expanded={menu} onClick={chooseFiles} className={`${primary} shrink-0`}>
+              Загрузить
+            </button>
+            {menu && (
+              <div className="absolute left-1/2 top-full z-20 mt-2 w-44 -translate-x-1/2 overflow-hidden rounded-control bg-paper-light py-1 text-left text-sm shadow-[0_8px_24px_rgba(0,0,0,0.5)] ring-1 ring-line">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenu(false);
+                    filesInput.current?.click();
+                  }}
+                  className="block w-full px-4 py-2.5 text-left text-ink-soft hover:bg-paper-deep hover:text-ink"
+                >
+                  Фото
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenu(false);
+                    folderInput.current?.click();
+                  }}
+                  className="block w-full px-4 py-2.5 text-left text-ink-soft hover:bg-paper-deep hover:text-ink"
+                >
+                  Папку целиком
+                </button>
+              </div>
+            )}
+          </div>
+          <input ref={filesInput} type="file" multiple accept="image/*" className="sr-only" tabIndex={-1} onChange={(e) => onFiles(e, false)} />
           <input ref={folderInput} type="file" multiple className="sr-only" tabIndex={-1} onChange={(e) => onFiles(e, true)} />
           {fileError && (
-            <p className="relative z-10 mt-3 text-sm text-accent-vivid" role="alert">
+            <p className="mt-3 text-sm text-accent-vivid" role="alert">
               {fileError}
             </p>
           )}
@@ -129,24 +178,25 @@ export default function UploadSources({
           }}
           className={`${tile} focus-within:shadow-[var(--card-ring-hover)]`}
         >
-          <LinkIcon width={32} height={32} className="text-ink-soft" />
-          <span className="mt-4 text-lg">По ссылке с Яндекс Диска</span>
+          {/* сервисы, откуда можно взять ссылку; пока только Яндекс Диск */}
+          {/* значок сервиса, откуда берётся ссылка (пока только Яндекс Диск), со скруглёнными углами */}
+          <span className={badge}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brands/yandex-disk.png" alt="Яндекс Диск" width={40} height={40} className="size-10 rounded-[10px]" />
+          </span>
+          <span className="mt-4 text-lg">По ссылке</span>
           <span className="mt-1 max-w-xs text-sm text-ink-soft">Публичная ссылка на папку со сканами</span>
-          <div className="mt-5 flex w-full max-w-sm flex-wrap justify-center gap-2">
+          <div className={`${action} w-full max-w-sm justify-center gap-2`}>
             <input
-              className={`${control} min-w-0 flex-1 basis-48 bg-paper`}
+              className={`${control} min-w-0 flex-1 bg-paper`}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://disk.yandex.ru/d/…"
               inputMode="url"
               autoComplete="off"
-              aria-label="Публичная ссылка на Яндекс Диск"
+              aria-label="Публичная ссылка на папку"
             />
-            <button
-              type="submit"
-              disabled={busy || !url.trim()}
-              className="rounded-control bg-ink px-4 py-2 text-sm text-paper transition-opacity hover:opacity-85 disabled:opacity-40"
-            >
+            <button type="submit" disabled={busy || !url.trim()} className={`${primary} shrink-0`}>
               {busy ? "Ищем…" : "Загрузить"}
             </button>
           </div>
