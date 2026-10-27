@@ -3,7 +3,7 @@ import { retryImportAction } from "@/app/upload/actions";
 
 // Загрузчик на весь сайт: загрузка, начатая на странице загрузки (UploadFlow.tsx), живёт здесь, а не в форме,
 // поэтому из формы можно уйти на любую страницу сайта — кадры продолжат уходить, ход виден в углу
-// (UploadIndicator.tsx). Оригиналы с устройства отправляет браузер по три сразу; импорт с Диска качает сервер,
+// (UploadIndicator.tsx). Оригиналы с устройства браузер шлёт кусочками, по два в пути; импорт с Диска качает сервер,
 // а загрузчик спрашивает, как он идёт.
 //
 // Загрузка целиком или никак (lib/uploads.ts на сервере): если закрыть вкладку или обновить страницу до конца,
@@ -315,8 +315,8 @@ function sendPart(job: UploadJob, item: QueueItem, st: FileState, part: number) 
         return;
       }
       const code = ((await r.json().catch(() => ({}))) as { error?: string }).error ?? "";
-      // отменена загрузка, кончился вход, файл слишком большой: повтор не поможет
-      if (code === "upload" || code === "auth" || code === "size") return failFile(job, item, code, r.status);
+      // отменена загрузка, кончился вход, файл слишком большой, нет места: повтор не поможет
+      if (code === "upload" || code === "auth" || code === "size" || code === "quota") return failFile(job, item, code, r.status);
       retryLater(job, item, st, `кусочек ${part + 1} из ${st.parts}: ответ ${r.status}`);
     })
     .catch(() => {

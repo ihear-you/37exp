@@ -6,7 +6,7 @@ import { MAX_FILE_BYTES, USER_QUOTA_BYTES } from "./limits";
 import { describePhoto, processPhoto } from "./process";
 
 // Приём кадра в плёнку: проверка лимитов, обработка, запись файлов и строки в базе.
-// Общий путь для загрузки с компьютера (app/api/rolls/[id]/frames) и импорта по ссылке (lib/import).
+// Общий путь для загрузки с компьютера (app/api/uploads/[id]/frames) и импорта по ссылке (lib/import).
 // Работает и вне запроса (фоновый импорт), поэтому берёт запросы к базе без connection().
 //
 // Импорт по ссылке идёт в два шага, чтобы плёнка появлялась за секунды:
@@ -35,7 +35,7 @@ export async function ingestPhoto(userId: number, rollId: number, idx: number, o
   let photo;
   const processing = Date.now();
   try {
-    photo = await processPhoto(original);
+    photo = await processPhoto(original, label);
   } catch {
     log("ingest", `${label}: не читается (${since(processing)} мс)`);
     return { status: "error", error: "format" };
@@ -119,7 +119,7 @@ export async function finalizePhoto(
   let photo;
   const processing = Date.now();
   try {
-    photo = await processPhoto(original);
+    photo = await processPhoto(original, `кадр ${frameId}`);
   } catch {
     log("ingest", `кадр ${frameId}: оригинал не читается`);
     return drop("format");

@@ -181,7 +181,7 @@ export async function createCamera(userId: number, name: string): Promise<Camera
 
 // ── загрузка кадров ──
 
-export type { NewFrame, NewRoll, FrameAccess } from "./queries";
+export type { NewFrame, NewRoll, FrameAccess, UploadSlot } from "./queries";
 
 /** Резервирует номера для `count` кадров плёнки и возвращает первый; null, если плёнки нет или она чужая */
 export async function reserveFrameSlots(userId: number, rollId: number, count: number): Promise<number | null> {
@@ -192,6 +192,12 @@ export async function reserveFrameSlots(userId: number, rollId: number, count: n
 export async function addFrame(userId: number, rollId: number, frame: q.NewFrame) {
   await connection();
   return q.insertFrame(userId, rollId, frame);
+}
+
+/** Незаконченные загрузки пользователя: с устройства и импорты */
+export async function countMyOpenUploads(userId: number): Promise<number> {
+  await connection();
+  return q.countUploads(userId);
 }
 
 export async function getUsedBytes(userId: number): Promise<number> {

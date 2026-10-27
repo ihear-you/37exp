@@ -1,13 +1,16 @@
 import { requireUser } from "@/lib/auth/session";
 import { background } from "@/lib/db";
-import { MAX_FILE_BYTES } from "@/lib/photos/limits";
-import { writeUploadPart } from "@/lib/storage";
-import { ensureSweeper } from "@/lib/uploads";
+import { MAX_FILE_BYTES, USER_QUOTA_BYTES } from "@/lib/photos/limits";
+import { listUploadParts, writeUploadPart } from "@/lib/storage";
+import { ensureSweeper, MAX_OPEN_PARTS, ownsIdx } from "@/lib/uploads";
 
 // Часть файла (lib/upload-queue.ts шлёт файлы кусочками по 1 МБ, по два сразу): тело — сами байты,
 // ?idx — номер кадра в плёнке, ?offset — с какого байта эта часть, ?size — размер файла целиком.
 // Части пишутся на свои места (могут прийти не по порядку), повтор безопасен. Кадр собирается
 // в app/api/uploads/[id]/frames, когда браузер получил ответы на все части.
+// До сборки файл лежит на диске и в лимит места ещё не попал, поэтому место ограничено иначе: номер кадра —
+// только из зарезервированных этой загрузкой, недособранных файлов — не больше MAX_OPEN_PARTS, файл не больше
+// MAX_FILE_MB и влезает в оставшийся лимит.
 
 /** Одна часть больше не бывает (браузер шлёт по 1 МБ) */
 const MAX_PART_BYTES = 2 * 1024 * 1024;
@@ -22,15 +25,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // загрузка целиком или никак (lib/uploads.ts): если её отменили (закрыли вкладку), части не нужны
   const uploadId = (await params).id;
   ensureSweeper();
-  if (!background.touchUpload(user.id, uploadId)) return json({ error: "upload" }, 410);
+  const upload = background.touchUpload(user.id, uploadId);
+  if (!upload) return json({ error: "upload" }, 410);
 
   const query = new URL(request.url).searchParams;
   const idx = int(query.get("idx"));
   const offset = int(query.get("offset"));
   const size = int(query.get("size"));
-  if (!(idx >= 1) || !(offset >= 0) || !(size >= 1)) return json({ error: "form" }, 400);
+  if (!(idx >= 1) || !(offset >= 0) || !(size >= 1) || !ownsIdx(upload, idx)) return json({ error: "form" }, 400);
   if (size > MAX_FILE_BYTES) return json({ error: "size" }, 413);
+  if (background.usedBytes(user.id) + size > USER_QUOTA_BYTES) return json({ error: "quota" }, 413);
   if (Number(request.headers.get("content-length") || 0) > MAX_PART_BYTES) return json({ error: "form" }, 400);
+  const open = await listUploadParts(uploadId);
+  if (!open.includes(idx) && open.length >= MAX_OPEN_PARTS) return json({ error: "busy" }, 429);
 
   const data = new Uint8Array(await request.arrayBuffer());
   if (!data.length || data.length > MAX_PART_BYTES || offset + data.length > size) return json({ error: "form" }, 400);

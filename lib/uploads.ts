@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { background } from "./db";
+import { background, type UploadSlot } from "./db";
 import { log } from "./log";
 import { deletePhotos, deleteUploadParts, listUploadsWithParts } from "./storage";
 
@@ -15,11 +15,33 @@ const STALE_MS = 30 * 60_000;
 const IMPORT_STALE_MS = 3 * 60_000;
 const SWEEP_EVERY_MS = 60_000;
 
-/** id: для импорта — номер его задания; для загрузки с устройства создаётся новый */
-export function startUpload(userId: number, rollId: number, newRoll: boolean, expected: number, id = randomBytes(9).toString("hex")): string {
+/** Сколько незаконченных загрузок (с устройства и импортов) может быть у одного человека сразу */
+export const MAX_OPEN_UPLOADS = 5;
+
+/**
+ * Сколько файлов одной загрузки может одновременно лежать недособранными (storage/parts). Загрузчик держит в пути
+ * два кусочка, поэтому обычно файлов один-два; запас — на файлы, кусочки которых не дошли и ждут «Повторить».
+ * Вместе с пределом на файл (MAX_FILE_MB) это ограничивает место, которое загрузка занимает до сборки
+ */
+export const MAX_OPEN_PARTS = 12;
+
+export const ownsIdx = (u: UploadSlot, idx: number) => u.firstIdx === null || (idx >= u.firstIdx && idx < u.firstIdx + u.expected);
+
+/**
+ * id: для импорта — номер его задания; для загрузки с устройства создаётся новый.
+ * firstIdx: первый из `expected` номеров, зарезервированных под загрузку: кадры с другими номерами она не принимает
+ */
+export function startUpload(
+  userId: number,
+  rollId: number,
+  newRoll: boolean,
+  expected: number,
+  firstIdx: number,
+  id = randomBytes(9).toString("hex"),
+): string {
   ensureSweeper();
-  background.insertUpload(id, userId, rollId, newRoll, expected);
-  log("upload", `загрузка ${id}: старт, плёнка ${rollId}${newRoll ? " (новая)" : ""}, кадров ${expected}`);
+  background.insertUpload(id, userId, rollId, newRoll, expected, firstIdx);
+  log("upload", `загрузка ${id}: старт, плёнка ${rollId}${newRoll ? " (новая)" : ""}, кадры №${firstIdx}–${firstIdx + expected - 1}`);
   return id;
 }
 

@@ -4,6 +4,7 @@ import { background } from "@/lib/db";
 import { log, mb, since } from "@/lib/log";
 import { ingestPhoto } from "@/lib/photos/ingest";
 import { deleteUploadPart, readUploadPart } from "@/lib/storage";
+import { ownsIdx } from "@/lib/uploads";
 
 // Файл пришёл целиком (все части, app/api/uploads/[id]/parts): собрать его и сделать кадр.
 // ?idx — номер кадра в плёнке (зарезервирован в startUploadAction), ?size — размер файла.
@@ -26,7 +27,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const query = new URL(request.url).searchParams;
   const idx = int(query.get("idx"));
   const size = int(query.get("size"));
-  if (!(idx >= 1) || !(size >= 1)) return json({ error: "form" }, 400);
+  if (!(idx >= 1) || !(size >= 1) || !ownsIdx(upload, idx)) return json({ error: "form" }, 400);
 
   const original = await readUploadPart(uploadId, idx, size);
   // частей не хватает (или файл уже собран раньше, а ответ потерялся): браузер решит по коду

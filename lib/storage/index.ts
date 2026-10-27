@@ -76,6 +76,13 @@ export async function writeUploadPart(uploadId: string, idx: number, offset: num
   }
 }
 
+/** Номера кадров, чьи файлы загрузки лежат недособранными */
+export async function listUploadParts(uploadId: string): Promise<number[]> {
+  if (!SAFE_ID.test(uploadId)) return [];
+  const names = await readdir(path.join(ROOT, "parts", uploadId)).catch(() => [] as string[]);
+  return names.map((n) => /^(\d+)\.part$/.exec(n)?.[1]).filter((n) => n !== undefined).map(Number);
+}
+
 /** Собранный файл или null, если его нет или размер не тот (пришли не все части) */
 export async function readUploadPart(uploadId: string, idx: number, size: number): Promise<Buffer | null> {
   if (!safePart(uploadId, idx)) return null;

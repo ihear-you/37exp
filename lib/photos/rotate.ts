@@ -3,7 +3,8 @@ import { background } from "../db";
 import { log, mb, since } from "../log";
 import { readOriginal, savePhoto } from "../storage";
 import { rotateJpegClockwise } from "./orientation";
-import { processPhoto } from "./process";
+import { MAX_PIXELS, processPhoto } from "./process";
+import { withPhotoSlot } from "./queue";
 
 // Поворот кадра на 90° по часовой. Поворачивается сам оригинал, копии для ленты и просмотра делаются заново.
 //   JPEG — без потерь: меняется только отметка ориентации в EXIF (lib/photos/orientation.ts), пиксели те же;
@@ -21,7 +22,7 @@ async function rotateOriginal(data: Buffer, ext: string): Promise<Buffer | null>
   if (ext !== "png" && ext !== "tif" && ext !== "webp") return null;
   const meta = await sharp(data).metadata();
   // сначала применяем прежнюю отметку ориентации, потом поворачиваем: в результате отметки уже нет
-  let img = sharp(data, { limitInputPixels: false }).autoOrient().rotate(90);
+  let img = sharp(data, { limitInputPixels: MAX_PIXELS }).autoOrient().rotate(90);
   if (meta.depth === "ushort") img = img.toColourspace((meta.channels ?? 3) >= 3 ? "rgb16" : "grey16");
   if (ext === "png") return img.png({ compressionLevel: 9 }).toBuffer();
   if (ext === "tif") return img.tiff({ compression: "lzw" }).toBuffer();
@@ -38,13 +39,14 @@ export async function rotatePhoto(userId: number, frameId: string): Promise<{ st
     if (!original) return { status: "error", error: "storage" };
     let rotated: Buffer | null;
     try {
-      rotated = await rotateOriginal(original.data, original.ext);
+      // PNG, TIFF и WebP пересохраняются целиком: это тяжёлая работа, через общую очередь (queue.ts)
+      rotated = await withPhotoSlot(`кадр ${frameId}: поворот`, () => rotateOriginal(original.data, original.ext));
     } catch {
       return { status: "error", error: "format" };
     }
     if (!rotated) return { status: "error", error: "format" };
 
-    const photo = await processPhoto(rotated);
+    const photo = await processPhoto(rotated, `кадр ${frameId}`);
     try {
       // keepOnFailure: если запись не удалась, прежние файлы кадра остаются, кадр не пропадает
       await savePhoto(userId, frameId, { original: { data: rotated, ext: original.ext }, feed: photo.feed, full: photo.full }, { keepOnFailure: true });
