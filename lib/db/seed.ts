@@ -1,15 +1,19 @@
 import type Database from "better-sqlite3";
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { CAMERAS, FRAMES, ROLLS } from "../catalog";
 import { uniqueHandle } from "./handle";
 import { DEFAULT_USER_ID, DEFAULT_USER_NAME } from "./user";
 
 /**
  * Заполняет пустую базу плёнками, камерами и кадрами из lib/catalog.ts и lib/photos/frames.json.
- * PLENKA_SEED=0 отключает это: база остаётся пустой (так на сервере).
+ * PLENKA_SEED=0 отключает это: база остаётся пустой (так на сервере). Файлов стартового набора (seed/photos) в открытом
+ * репозитории нет — без них база тоже остаётся пустой, иначе в ней были бы кадры без картинок.
  */
 export function seedIfEmpty(db: Database.Database) {
   if (process.env.PLENKA_SEED === "0") return;
+  if (!existsSync(path.join(process.cwd(), "seed", "photos", "f"))) return;
   db.transaction(() => {
     if (db.prepare("SELECT 1 FROM users LIMIT 1").get()) return;
 

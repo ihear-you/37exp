@@ -11,7 +11,7 @@ import path from "node:path";
 //   storage/originals/<user>/<id>.<ext>   оригинал как загружен
 //   storage/parts/<upload>/<idx>.part     файл, который ещё приходит кусочками (lib/upload-queue.ts)
 //
-// Кадры из стартового набора (seed/photos) лежат в репозитории и читаются оттуда.
+// Кадры из стартового набора (seed/photos) читаются оттуда; в git этой папки нет (личные фото), она только локально.
 
 const ROOT = process.env.PLENKA_STORAGE_DIR ?? path.join(process.cwd(), "storage");
 const SEED = path.join(process.cwd(), "seed", "photos");
