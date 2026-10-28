@@ -15,6 +15,7 @@ const tile =
 const action = "mt-5 flex min-h-10 items-center";
 const badge = "grid size-10 place-items-center";
 const primary = "rounded-control bg-ink px-5 py-2 text-sm text-paper transition-opacity hover:opacity-85 disabled:opacity-40";
+const secondary = "rounded-control bg-paper-deep px-5 py-2 text-sm text-ink ring-1 ring-line transition-colors hover:bg-paper-edge";
 
 /**
  * Первый шаг загрузки: два способа взять кадры — с устройства (выбрать или перетащить файлы или папку) и по ссылке
@@ -33,9 +34,6 @@ export default function UploadSources({
   const [drag, setDrag] = useState(false);
   const folderInput = useRef<HTMLInputElement>(null);
   const filesInput = useRef<HTMLInputElement>(null);
-  /** На компьютере «Загрузить» спрашивает, что выбрать: фото или папку целиком (папку умеют отдавать только они) */
-  const [menu, setMenu] = useState(false);
-  const menuBox = useRef<HTMLDivElement>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -44,24 +42,6 @@ export default function UploadSources({
   useEffect(() => {
     folderInput.current?.setAttribute("webkitdirectory", "");
   }, []);
-
-  useEffect(() => {
-    if (!menu) return;
-    const onDown = (e: PointerEvent) => !menuBox.current?.contains(e.target as Node) && setMenu(false);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
-    window.addEventListener("pointerdown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [menu]);
-
-  const chooseFiles = () => {
-    // на телефоне папку не выбрать: сразу фото
-    if (window.matchMedia("(min-width: 768px)").matches) setMenu((v) => !v);
-    else filesInput.current?.click();
-  };
 
   const pick = (picked: UploadHandoff) => {
     if (onPick) return onPick(picked);
@@ -118,7 +98,7 @@ export default function UploadSources({
       <h1 className="font-display text-center text-[26px] leading-tight md:text-[36px]">Загрузите плёнку</h1>
 
       <div className="mt-5 grid gap-3 md:mt-8 md:grid-cols-2 md:gap-4">
-        {/* на плитку можно бросить файлы или папку; «Загрузить» — выбрать фото или папку */}
+        {/* на плитку можно бросить файлы или папку; или выбрать их кнопками */}
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -132,35 +112,15 @@ export default function UploadSources({
             <UploadIcon width={30} height={30} className="text-ink-soft" />
           </span>
           <span className="mt-4 text-lg">С устройства</span>
-          <span className="mt-1 max-w-xs text-sm text-ink-soft">Отдельные фото или папку целиком</span>
-          <div ref={menuBox} className={`${action} relative`}>
-            <button type="button" aria-expanded={menu} onClick={chooseFiles} className={`${primary} shrink-0`}>
-              Загрузить
+          <span className="mt-1 max-w-xs text-sm text-ink-soft">Сканы плёнки с компьютера или телефона</span>
+          <div className={`${action} gap-2`}>
+            <button type="button" onClick={() => filesInput.current?.click()} className={`${primary} shrink-0`}>
+              Выбрать фото
             </button>
-            {menu && (
-              <div className="absolute left-1/2 top-full z-20 mt-2 w-44 -translate-x-1/2 overflow-hidden rounded-control bg-paper-light py-1 text-left text-sm shadow-[0_8px_24px_rgba(0,0,0,0.5)] ring-1 ring-line">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenu(false);
-                    filesInput.current?.click();
-                  }}
-                  className="block w-full px-4 py-2.5 text-left text-ink-soft hover:bg-paper-deep hover:text-ink"
-                >
-                  Фото
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenu(false);
-                    folderInput.current?.click();
-                  }}
-                  className="block w-full px-4 py-2.5 text-left text-ink-soft hover:bg-paper-deep hover:text-ink"
-                >
-                  Папку целиком
-                </button>
-              </div>
-            )}
+            {/* папку целиком умеют отдавать только браузеры на компьютере: на телефоне второй кнопки нет */}
+            <button type="button" onClick={() => folderInput.current?.click()} className={`${secondary} hidden shrink-0 md:block`}>
+              Выбрать папку
+            </button>
           </div>
           <input ref={filesInput} type="file" multiple accept="image/*" className="sr-only" tabIndex={-1} onChange={(e) => onFiles(e, false)} />
           <input ref={folderInput} type="file" multiple className="sr-only" tabIndex={-1} onChange={(e) => onFiles(e, true)} />

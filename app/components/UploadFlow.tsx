@@ -13,6 +13,7 @@ import {
   type RollEdit,
 } from "@/lib/catalog";
 import { parseFolderName } from "@/lib/folder-name";
+import { createStore } from "@/lib/persist";
 import { isImageFile, takeUploadHandoff, type UploadHandoff } from "@/lib/upload-handoff";
 import {
   cancelJob,
@@ -47,6 +48,9 @@ export interface UploadDefaults {
   cameraId: string;
   format: Format;
 }
+
+/** Подсказку «Фото загружаются в фоне…» человек видит только при первой загрузке (запоминается в браузере) */
+const uploadHint = createStore<{ seen: boolean }>("plenka:upload-hint", "local", () => ({ seen: false }));
 
 /** 1 файл, 2 файла, 5 файлов */
 const plural = (n: number, one: string, few: string, many: string) =>
@@ -98,6 +102,7 @@ export default function UploadFlow({
   first: boolean;
 }) {
   // checking: смотрим, не выбраны ли кадры ещё на странице папок (lib/upload-handoff.ts); pick: плитки; upload: идёт загрузка
+  const router = useRouter();
   const [phase, setPhase] = useState<"checking" | "pick" | "upload">("checking");
   const [films, setFilms] = useState(savedFilms);
   const [cameras, setCameras] = useState(savedCameras);
@@ -207,16 +212,15 @@ export default function UploadFlow({
     setPhase("pick");
   };
 
-  // Выбрали не те фото: загрузка отменяется, уже пришедшие кадры и созданная ею папка стираются, снова плитки
-  // переспрашиваем прямо на странице, а не окном браузера: confirm() в некоторых браузерах молча не показывается
-  const [confirmOthers, setConfirmOthers] = useState(false);
   /** На телефоне и планшете сетка фото свёрнута в строку превью: главное там — карточка плёнки */
   const [showAll, setShowAll] = useState(false);
-  const chooseOthers = async () => {
-    setConfirmOthers(false);
+  // «Не сохранять»: загрузка отменяется, уже пришедшие кадры и созданная ею папка стираются, и человек
+  // возвращается туда, откуда пришёл (зашли на /upload напрямую — на «Папки»)
+  const discard = async () => {
     if (jobId) cancelJob(jobId);
     if (rollId !== null) await deleteRollAction(rollId);
-    reset();
+    if (window.history.length > 1) router.back();
+    else router.push("/rolls");
   };
 
   if (phase === "checking") return <div className="min-h-[calc(100dvh-5rem)]" />;
@@ -291,25 +295,6 @@ export default function UploadFlow({
                 )}
               </p>
             )}
-            {confirmOthers ? (
-              <p className="flex basis-full flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-soft" role="alert">
-                Загрузка отменится, а уже загруженные фото этой папки удалятся
-                <button type="button" onClick={() => void chooseOthers()} className="text-accent-vivid underline underline-offset-4">
-                  Выбрать другие
-                </button>
-                <button type="button" onClick={() => setConfirmOthers(false)} className="underline underline-offset-4 hover:text-ink">
-                  Отмена
-                </button>
-              </p>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setConfirmOthers(true)}
-                className="basis-full text-left text-sm text-ink-soft underline underline-offset-4 hover:text-ink"
-              >
-                Выбрать другие фото
-              </button>
-            )}
           </div>
         )}
         {!startError && view.length > 0 && <Strip items={view} expanded={showAll} onToggle={() => setShowAll((v) => !v)} />}
@@ -328,6 +313,7 @@ export default function UploadFlow({
               films={films}
               cameras={cameras}
               finished={finished}
+              onDiscard={discard}
               onFilm={(f) => setFilms((p) => [...p, f])}
               onCamera={(c) => setCameras((p) => [...p, c])}
               onSaved={(d) => jobId && renameJob(jobId, d.title || makeTitle(findFilm(d.filmId, films), d, d.iso))}
@@ -430,7 +416,8 @@ function Thumbs({ items, started, onRetry }: { items: QueueItem[]; started: bool
 
 /**
  * «Что это за плёнка?» — поля уже заполнены догадками, папка с ними уже создана. «Сохранить и продолжить» меняет её
- * и ведёт в папку, «Не сохранять» — в папку без изменений; загрузка идёт дальше в фоне. Пока папка создаётся
+ * и ведёт в папку (загрузка идёт дальше в фоне), «Не сохранять» — отменяет загрузку целиком (кадры и папка стираются)
+ * и уводит назад. Пока папка создаётся
  * (rollId ещё нет), уйти нельзя, но заполнять можно
  */
 function RollCard({
@@ -439,6 +426,7 @@ function RollCard({
   films,
   cameras,
   finished,
+  onDiscard,
   onFilm,
   onCamera,
   onSaved,
@@ -448,6 +436,8 @@ function RollCard({
   films: Film[];
   cameras: Camera[];
   finished: boolean;
+  /** «Не сохранять»: отменить загрузку целиком и уйти назад */
+  onDiscard: () => Promise<void>;
   onFilm: (f: Film) => void;
   onCamera: (c: Camera) => void;
   onSaved: (d: Draft) => void;
@@ -459,6 +449,12 @@ function RollCard({
   const [period, setPeriod] = useState<PeriodValue>({ month: initial.month, year: initial.year, endMonth: initial.endMonth, endYear: initial.endYear });
   const [description, setDescription] = useState(initial.description);
   const [saving, setSaving] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  // показать подсказку про фоновую загрузку, если человек её ещё не видел; решаем один раз при открытии карточки
+  const [showHint] = useState(() => !uploadHint.get().seen);
+  useEffect(() => {
+    if (showHint) uploadHint.set({ seen: true });
+  }, [showHint]);
   const [error, setError] = useState<string | null>(null);
 
   const auto = makeTitle(findFilm(film.filmId ?? UNKNOWN_FILM, films), period, film.iso);
@@ -525,10 +521,13 @@ function RollCard({
         </p>
       )}
       <div className="border-t border-line pt-4">
-        <p className="text-sm text-ink-soft">
-          {finished ? "Все фото загружены" : "Фото загружаются в фоне. Не закрывайте вкладку, пока загрузка не закончится"}
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+        {/* подсказку про фоновую загрузку показываем один раз — при первой загрузке на этом устройстве */}
+        {showHint && (
+          <p className="mb-3 text-sm text-ink-soft">
+            {finished ? "Все фото загружены" : "Фото загружаются в фоне. Не закрывайте вкладку, пока загрузка не закончится"}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <button
             type="submit"
             disabled={rollId === null || saving}
@@ -538,8 +537,11 @@ function RollCard({
           </button>
           <button
             type="button"
-            disabled={rollId === null}
-            onClick={() => rollId !== null && router.push(`/rolls/${rollId}`)}
+            disabled={rollId === null || leaving}
+            onClick={() => {
+              setLeaving(true);
+              void onDiscard();
+            }}
             className="text-sm text-ink-soft underline underline-offset-4 hover:text-ink disabled:opacity-40"
           >
             Не сохранять
