@@ -23,7 +23,7 @@ export default function BottomBarNav({ hasArchive, rollCount }: { hasArchive: bo
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-30 flex h-16 border-t border-line bg-paper/95 backdrop-blur-md md:hidden"
+      className="fixed inset-x-0 bottom-0 z-30 flex h-[calc(4rem+env(safe-area-inset-bottom))] border-t border-line bg-paper/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
       aria-label="Основное"
     >
       {ITEMS.map((item) => {

@@ -533,7 +533,7 @@ function RollCard({
         </p>
       )}
       {/* ниже lg кнопки всегда на виду: заполнять поля необязательно. Панель непрозрачная и лежит поверх нижнего меню */}
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-paper px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 md:px-5 lg:static lg:bg-transparent lg:px-0 lg:pb-0 lg:pt-4">
+      <div className="fixed inset-x-0 bottom-0 z-40 min-h-[calc(4rem+env(safe-area-inset-bottom))] border-t border-line bg-paper px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 md:px-5 lg:static lg:bg-transparent lg:px-0 lg:pb-0 lg:pt-4">
         {/* подсказку про фоновую загрузку показываем один раз — при первой загрузке на этом устройстве */}
         {showHint && (
           <p className="mb-3 text-sm text-ink-soft">

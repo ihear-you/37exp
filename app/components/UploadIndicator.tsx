@@ -69,7 +69,7 @@ export default function UploadIndicator() {
     // на телефоне над нижней панелью навигации, на широком экране в правом нижнем углу; поверх просмотра кадра
     // на весь экран (z-50), чтобы «Отменить» было видно сразу после удаления из него
     <div
-      className="fixed inset-x-3 bottom-20 z-[60] flex flex-col gap-2 md:inset-x-auto md:bottom-5 md:right-5 md:w-96"
+      className="fixed inset-x-3 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-[60] flex flex-col gap-2 md:inset-x-auto md:bottom-5 md:right-5 md:w-96"
       aria-live="polite"
     >
       {undo && <UndoPlaque key={undo.at} count={undo.ids.length} onUndo={() => void restore(takeUndo(), router)} />}

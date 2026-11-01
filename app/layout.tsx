@@ -27,10 +27,13 @@ const interTight = Inter_Tight({
 export const metadata: Metadata = {
   title: "[37exp]: архив плёночных кадров",
   description: "Плёночные кадры одной лентой и по папкам.",
+  // с экрана «Домой» на iPhone: без адресной строки, строка статуса чёрная, страница начинается под ней
+  appleWebApp: { capable: true, title: "Плёнка", statusBarStyle: "black" },
 };
 
 export const viewport: Viewport = {
   themeColor: "#0a0a0a",
+  viewportFit: "cover",
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
