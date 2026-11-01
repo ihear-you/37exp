@@ -4,6 +4,8 @@
 :root {
   --paper: #0a0a0a;
   --paper-light: #121212;
+  /* плитки папок и загрузки, карточка формы */
+  --paper-card: #171717;
   --paper-deep: #1c1c1c;
   --paper-edge: #2c2c2c;
   --ink: #f2f2f2;
@@ -18,7 +20,6 @@
   --frame-ring: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 1px 3px rgba(0, 0, 0, 0.6);
   --frame-ring-light: 0 0 0 1px rgba(255, 255, 255, 0.22), 0 2px 8px rgba(0, 0, 0, 0.6);
   /* та же пара, но для карточек плёнки: чуть мягче в покое, заметнее при наведении */
-  --card-ring: 0 0 0 1px var(--line), 0 1px 3px rgba(0, 0, 0, 0.5);
   --card-ring-hover: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 6px 18px rgba(0, 0, 0, 0.55);
 
   /* скругление кнопок/пилюль и, отдельно, кадров (Masonry, превью загрузки) */
@@ -29,6 +30,7 @@
 @theme inline {
   --color-paper: var(--paper);
   --color-paper-light: var(--paper-light);
+  --color-paper-card: var(--paper-card);
   --color-paper-deep: var(--paper-deep);
   --color-paper-edge: var(--paper-edge);
   --color-ink: var(--ink);

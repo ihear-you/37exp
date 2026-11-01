@@ -1,5 +1,5 @@
 export const control =
-  "w-full rounded-control bg-paper-light px-3 py-2 text-sm ring-1 ring-line transition-shadow focus:outline-none focus:ring-2 focus:ring-ink/50";
+  "w-full rounded-control bg-paper-light px-3 py-2.5 text-base ring-1 ring-line transition-shadow focus:outline-none focus:ring-2 focus:ring-ink/50 md:py-2 md:text-sm";
 
 /** Селект со своей стрелкой: иконка отступает от границы, текст не заезжает под неё */
 export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {

@@ -11,11 +11,11 @@ import PhotoFan, { type FanPic } from "./PhotoFan";
 // Плитки устроены одинаково: значок, заголовок, подпись и сразу под ними действие (кнопка или поле ссылки),
 // всё по центру плитки. Значок и строка действия в обеих одной высоты, поэтому всё стоит на одном уровне
 const tile =
-  "relative flex flex-col items-center justify-center rounded-[20px] bg-paper-light p-5 text-center shadow-[var(--card-ring)] transition-shadow md:min-h-72 md:p-8";
+  "relative flex flex-col items-center justify-center rounded-[20px] bg-paper-card p-5 text-center md:min-h-72 md:p-8";
 const action = "mt-5 flex min-h-10 items-center";
 const badge = "grid size-10 place-items-center";
-const primary = "rounded-control bg-ink px-5 py-2 text-sm text-paper transition-opacity hover:opacity-85 disabled:opacity-40";
-const secondary = "rounded-control bg-paper-deep px-5 py-2 text-sm text-ink ring-1 ring-line transition-colors hover:bg-paper-edge";
+const primary = "h-11 rounded-control bg-ink px-5 text-sm md:h-9 text-paper transition-opacity hover:opacity-85 disabled:bg-paper-edge disabled:text-ink-faint disabled:opacity-100";
+const secondary = "h-11 rounded-control bg-paper-deep px-5 text-sm md:h-9 text-ink ring-1 ring-line transition-colors hover:bg-paper-edge";
 
 /**
  * Первый шаг загрузки: два способа взять кадры — с устройства (выбрать или перетащить файлы или папку) и по ссылке
@@ -136,7 +136,7 @@ export default function UploadSources({
             e.preventDefault();
             void findByLink();
           }}
-          className={`${tile} focus-within:shadow-[var(--card-ring-hover)]`}
+          className={tile}
         >
           {/* сервисы, откуда можно взять ссылку; пока только Яндекс Диск */}
           {/* значок сервиса, откуда берётся ссылка (пока только Яндекс Диск), со скруглёнными углами */}
@@ -148,10 +148,10 @@ export default function UploadSources({
           <span className="mt-1 max-w-xs text-sm text-ink-soft">Публичная ссылка на папку со сканами</span>
           <div className={`${action} w-full max-w-sm justify-center gap-2`}>
             <input
-              className={`${control} min-w-0 flex-1 bg-paper`}
+              className={`${control} min-w-0 flex-1`}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://disk.yandex.ru/d/…"
+              placeholder="disk.yandex.ru/d/…"
               inputMode="url"
               autoComplete="off"
               aria-label="Публичная ссылка на папку"

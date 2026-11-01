@@ -34,10 +34,10 @@ export function RollsSkeleton() {
       </div>
       <ul className="grid grid-cols-1 gap-3 pb-16 pt-4 sm:grid-cols-2 md:gap-4 lg:grid-cols-3 xl:grid-cols-4">
         {Array.from({ length: 8 }, (_, i) => (
-          <li key={i} className="rounded-[20px] bg-paper-light p-5 shadow-[var(--card-ring)]">
-            <div className="aspect-[2/1] w-full animate-pulse rounded-[14px] bg-paper-deep" />
-            <div className="mx-auto mt-6 h-4 w-2/3 animate-pulse rounded bg-paper-deep" />
-            <div className="mx-auto mt-2 h-3 w-1/3 animate-pulse rounded bg-paper-deep" />
+          <li key={i} className="rounded-[20px] bg-paper-card p-5">
+            <div className="aspect-[2/1] w-full animate-pulse rounded-[14px] bg-paper-edge" />
+            <div className="mx-auto mt-6 h-4 w-2/3 animate-pulse rounded bg-paper-edge" />
+            <div className="mx-auto mt-2 h-3 w-1/3 animate-pulse rounded bg-paper-edge" />
           </li>
         ))}
       </ul>

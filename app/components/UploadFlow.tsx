@@ -32,7 +32,7 @@ import { deleteRollAction, saveRollAction } from "../rolls/[id]/actions";
 import { startImportAction, startUploadAction } from "../upload/actions";
 import { control, Field, type PeriodValue } from "./fields";
 import { CameraField, FilmField, PeriodPicker, filmValue, resolveFilmAndCamera, type FilmValue } from "./RollFields";
-import { CheckIcon, ChevronIcon, RetryIcon } from "./icons";
+import { CheckIcon, RetryIcon } from "./icons";
 import type { FanPic } from "./PhotoFan";
 import BackButton from "./BackButton";
 import UploadSources from "./UploadSources";
@@ -212,8 +212,6 @@ export default function UploadFlow({
     setPhase("pick");
   };
 
-  /** На телефоне и планшете сетка фото свёрнута в строку превью: главное там — карточка плёнки */
-  const [showAll, setShowAll] = useState(false);
   // «Не сохранять»: загрузка отменяется, уже пришедшие кадры и созданная ею папка стираются, и человек
   // возвращается туда, откуда пришёл (зашли на /upload напрямую — на «Папки»)
   const discard = async () => {
@@ -253,9 +251,9 @@ export default function UploadFlow({
   const status = finished ? `Загружено фото: ${done} из ${total}` : `Загружаются фото: ${done} из ${total}`;
 
   return (
-    // на телефоне по порядку: ход загрузки со строкой превью, раскрытая сетка кадров (если раскрыли), карточка;
-    // на широком экране (lg) сетка видна всегда, а карточка справа во всю высоту
-    <div className="grid gap-6 pb-28 pt-2 md:pb-10 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-[auto_1fr] lg:gap-x-10 lg:gap-y-0">
+    // на телефоне и планшете по порядку: ход загрузки с лентой кадров, поля, кнопки закреплены внизу экрана;
+    // на широком экране (lg) вместо ленты сетка, а карточка справа во всю высоту
+    <div className="grid gap-6 pb-40 pt-2 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-[auto_1fr] lg:gap-x-10 lg:gap-y-0 lg:pb-10">
 
       {/* ── ход загрузки ── */}
       <section aria-label="Загрузка" className="min-w-0 lg:col-start-1 lg:row-start-1">
@@ -297,10 +295,10 @@ export default function UploadFlow({
             )}
           </div>
         )}
-        {!startError && view.length > 0 && <Strip items={view} expanded={showAll} onToggle={() => setShowAll((v) => !v)} />}
+        {!startError && view.length > 0 && <Strip items={view} started={!!job} onRetry={(id) => jobId && retryJob(jobId, id)} />}
       </section>
 
-      <section aria-label="Кадры" className={`min-w-0 lg:col-start-1 lg:row-start-2 lg:block ${showAll ? "" : "hidden"}`}>
+      <section aria-label="Кадры" className="hidden min-w-0 lg:col-start-1 lg:row-start-2 lg:block">
         <Thumbs items={view} started={!!job} onRetry={(id) => jobId && retryJob(jobId, id)} />
       </section>
 
@@ -326,31 +324,70 @@ export default function UploadFlow({
   );
 }
 
-/** Ниже lg: первые кадры маленькими превью и «+N»; нажатие раскрывает всю сетку (мельче, чем на компьютере) прямо под строкой */
-function Strip({ items, expanded, onToggle }: { items: QueueItem[]; expanded: boolean; onToggle: () => void }) {
-  const first = items.slice(0, 4);
-  const rest = items.length - first.length;
+/** Ход загрузки поверх кадра: полоска, галочка, повтор или причина отказа. Общее у ленты и сетки */
+function FrameStatus({ item: i, started, onRetry }: { item: QueueItem; started: boolean; onRetry: (id: number) => void }) {
   return (
-    <button type="button" onClick={onToggle} aria-expanded={expanded} className="mt-3 flex w-full items-center gap-1.5 text-left lg:hidden">
-      {first.map((i) => (
-        <span key={i.id} className="relative size-11 shrink-0 overflow-hidden rounded-[6px] bg-paper-deep ring-1 ring-line">
-          {i.url && (
+    <>
+      {started && i.status !== "done" && (
+        <div className="absolute inset-x-0 bottom-0 h-1 bg-black/15">
+          <div className={`h-full ${i.status === "error" ? "bg-accent" : "bg-ink"}`} style={{ width: `${i.progress}%` }} />
+        </div>
+      )}
+      {i.status === "done" && (
+        <span className="absolute right-1 top-1 grid size-5 place-items-center rounded-full bg-paper/90 text-ink shadow-sm">
+          <CheckIcon width={12} height={12} />
+        </span>
+      )}
+      {i.status === "error" && i.fatal && (
+        // сервер отклонил файл окончательно: повтор не поможет, только причина
+        <span className="absolute inset-0 grid place-items-center bg-paper/85 p-1.5 text-center text-[10px] leading-tight text-accent">{i.error}</span>
+      )}
+      {i.status === "error" && !i.fatal && (
+        <button
+          type="button"
+          onClick={() => onRetry(i.id)}
+          className="absolute inset-0 grid place-items-center bg-paper/85 text-accent"
+          aria-label={`Повторить загрузку ${i.name}`}
+        >
+          <span className="flex flex-col items-center gap-1 text-[11px]">
+            <RetryIcon width={18} height={18} />
+            Повторить
+          </span>
+        </button>
+      )}
+    </>
+  );
+}
+
+/**
+ * Ниже lg: все кадры одной лентой, листается пальцем вбок. Кадры без обрезки, высота одна; не загрузившиеся — в начале,
+ * чтобы их не искать. Картинки lazy: на телефоне это исходные файлы, десятки сразу не поместятся в памяти
+ */
+function Strip({ items, started, onRetry }: { items: QueueItem[]; started: boolean; onRetry: (id: number) => void }) {
+  const [broken, setBroken] = useState<ReadonlySet<number>>(new Set());
+  const failedFirst = [...items.filter((i) => i.status === "error"), ...items.filter((i) => i.status !== "error")];
+  return (
+    <ul className="no-scrollbar -mx-3 mt-4 flex gap-1.5 overflow-x-auto px-3 py-px md:-mx-5 md:px-5 lg:hidden">
+      {failedFirst.map((i) => (
+        <li key={i.id} className="relative h-32 min-w-20 shrink-0 overflow-hidden rounded-frame bg-paper-deep ring-1 ring-line" title={i.name}>
+          {i.url && !broken.has(i.id) ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={i.url}
               alt=""
+              loading="lazy"
+              decoding="async"
               referrerPolicy="no-referrer"
-              className={`size-full object-cover ${i.status === "done" || i.shown ? "" : "opacity-60"}`}
+              onError={() => setBroken((prev) => new Set(prev).add(i.id))}
+              className={`h-full w-auto max-w-none transition-opacity ${i.status === "done" || i.shown || !started ? "opacity-100" : "opacity-60"}`}
             />
+          ) : (
+            <span className="grid h-full w-20 place-items-center break-all p-1.5 text-center text-[10px] leading-tight text-ink-faint">{i.name}</span>
           )}
-        </span>
+          <FrameStatus item={i} started={started} onRetry={onRetry} />
+        </li>
       ))}
-      {rest > 0 && <span className="grid size-11 shrink-0 place-items-center rounded-[6px] bg-paper-deep text-xs text-ink-soft ring-1 ring-line">+{rest}</span>}
-      <span className="ml-auto flex shrink-0 items-center gap-1 text-sm text-ink-soft">
-        {expanded ? "Свернуть" : "Все фото"}
-        <ChevronIcon width={12} height={12} className={expanded ? "-rotate-90" : "rotate-90"} />
-      </span>
-    </button>
+    </ul>
   );
 }
 
@@ -381,33 +418,7 @@ function Thumbs({ items, started, onRetry }: { items: QueueItem[]; started: bool
           ) : (
             <span className="absolute inset-0 grid place-items-center break-all p-1.5 text-center text-[10px] leading-tight text-ink-faint">{i.name}</span>
           )}
-          {started && i.status !== "done" && (
-            <div className="absolute inset-x-0 bottom-0 h-1 bg-black/15">
-              <div className={`h-full ${i.status === "error" ? "bg-accent" : "bg-ink"}`} style={{ width: `${i.progress}%` }} />
-            </div>
-          )}
-          {i.status === "done" && (
-            <span className="absolute right-1 top-1 grid size-5 place-items-center rounded-full bg-paper/90 text-ink shadow-sm">
-              <CheckIcon width={12} height={12} />
-            </span>
-          )}
-          {i.status === "error" && i.fatal && (
-            // сервер отклонил файл окончательно: повтор не поможет, только причина
-            <span className="absolute inset-0 grid place-items-center bg-paper/85 p-1.5 text-center text-[10px] leading-tight text-accent">{i.error}</span>
-          )}
-          {i.status === "error" && !i.fatal && (
-            <button
-              type="button"
-              onClick={() => onRetry(i.id)}
-              className="absolute inset-0 grid place-items-center bg-paper/85 text-accent"
-              aria-label={`Повторить загрузку ${i.name}`}
-            >
-              <span className="flex flex-col items-center gap-1 text-[11px]">
-                <RetryIcon width={18} height={18} />
-                Повторить
-              </span>
-            </button>
-          )}
+          <FrameStatus item={i} started={started} onRetry={onRetry} />
         </li>
       ))}
     </ul>
@@ -491,11 +502,12 @@ function RollCard({
   };
 
   return (
-    <form onSubmit={save} className="space-y-4 rounded-[20px] bg-paper-light p-5 shadow-[var(--card-ring)]" aria-label="Что это за плёнка?">
-      <h2 className="font-display text-xl leading-tight">Что это за плёнка?</h2>
+    // ниже lg это не карточка, а поля прямо на странице
+    <form onSubmit={save} className="space-y-4 lg:rounded-[20px] lg:bg-paper-card lg:p-5" aria-label="Что это за плёнка?">
+      <h2 className="hidden font-display text-xl leading-tight lg:block">Что это за плёнка?</h2>
 
       <Field label="Название папки">
-        <input className={control} value={title} placeholder={auto} onChange={(e) => setTitle(e.target.value)} />
+        <input className={control} value={title} placeholder="Кадры помнят, а вы?" onChange={(e) => setTitle(e.target.value)} />
       </Field>
       <Field label="Плёнка">
         <FilmField value={film} films={films} onChange={setFilm} />
@@ -520,20 +532,25 @@ function RollCard({
           {error}
         </p>
       )}
-      <div className="border-t border-line pt-4">
+      {/* ниже lg кнопки всегда на виду: заполнять поля необязательно. Панель непрозрачная и лежит поверх нижнего меню */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-paper px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 md:px-5 lg:static lg:bg-transparent lg:px-0 lg:pb-0 lg:pt-4">
         {/* подсказку про фоновую загрузку показываем один раз — при первой загрузке на этом устройстве */}
         {showHint && (
           <p className="mb-3 text-sm text-ink-soft">
             {finished ? "Все фото загружены" : "Фото загружаются в фоне. Не закрывайте вкладку, пока загрузка не закончится"}
           </p>
         )}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex flex-row-reverse items-center justify-between gap-x-4 lg:flex-row lg:justify-start">
           <button
             type="submit"
             disabled={rollId === null || saving}
-            className="rounded-control bg-ink px-5 py-2.5 text-sm text-paper transition-opacity hover:opacity-85 disabled:opacity-40"
+            className="h-11 rounded-control bg-ink px-5 text-sm text-paper transition-opacity hover:opacity-85 disabled:bg-paper-edge md:h-9 disabled:text-ink-faint disabled:opacity-100"
           >
-            {saving ? "Сохраняем…" : rollId === null ? "Создаём папку…" : "Сохранить и продолжить"}
+            {saving ? "Сохраняем…" : rollId === null ? "Создаём папку…" : (
+              <>
+                Сохранить<span className="hidden lg:inline"> и продолжить</span>
+              </>
+            )}
           </button>
           <button
             type="button"

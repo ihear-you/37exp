@@ -66,8 +66,6 @@ export interface RollPage {
   /** Автор плёнки: адрес его страницы и признак «это я» */
   ownerHandle: string;
   isOwner: boolean;
-  /** Соседние плёнки автора, которые viewer видит, вместе с самой плёнкой */
-  siblings: RollView[];
 }
 
 /**
@@ -79,15 +77,13 @@ export async function getRollForViewer(id: number, viewerId: number | null, keys
   await connection();
   const found = q.findRoll(id);
   if (!found) return null;
-  const { roll, ownerId, count } = found;
+  const { roll, ownerId } = found;
   if (!canView({ ownerId, visibility: roll.visibility ?? "private", shareKey: roll.shareKey ?? null }, viewerId, keys)) return null;
 
   const isOwner = viewerId === ownerId;
   const owner = q.findUserById(ownerId);
   const cameras = q.listCameras(ownerId);
   const films = [...FILMS, ...q.listUserFilms(ownerId)];
-  const views = q.listRolls(ownerId, !isOwner).map(({ roll: r, count: n }) => rollView(r, cameras, n, films));
-  if (!views.some((v) => v.id === roll.id)) views.push(rollView(roll, cameras, count, films)); // плёнка «по ссылке»
 
   return {
     roll: isOwner ? roll : { ...roll, shareKey: undefined },
@@ -96,7 +92,6 @@ export async function getRollForViewer(id: number, viewerId: number | null, keys
     films,
     ownerHandle: owner?.handle ?? "",
     isOwner,
-    siblings: views,
   };
 }
 

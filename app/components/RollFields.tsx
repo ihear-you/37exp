@@ -99,7 +99,7 @@ function Suggest({
         <ul
           id={list}
           role="listbox"
-          className="absolute inset-x-0 top-full z-30 mt-1 max-h-72 overflow-y-auto rounded-control bg-paper-light py-1 shadow-[0_8px_24px_rgba(0,0,0,0.5)] ring-1 ring-line"
+          className="absolute inset-x-0 top-full z-50 mt-2 max-h-72 overflow-y-auto rounded-control bg-paper-light py-1 shadow-[0_8px_24px_rgba(0,0,0,0.5)] ring-1 ring-line"
         >
           {shown.map((o, i) => (
             <li
@@ -245,7 +245,7 @@ export function PeriodPicker({ value, onChange }: { value: PeriodValue; onChange
   const [year, setYear] = useState(value.year);
   /** Выбор года сеткой (по 12 лет на страницу); lastYear — последний год на странице */
   const [years, setYears] = useState<{ lastYear: number } | null>(null);
-  /** Выбрано начало, ждём конец */
+  /** Первый месяц уже выбран и записан: второй месяц сделает из него период */
   const [start, setStart] = useState<{ year: number; month: number } | null>(null);
   const [hover, setHover] = useState<number | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -272,7 +272,9 @@ export function PeriodPicker({ value, onChange }: { value: PeriodValue; onChange
   }, [open, close]);
 
   const choose = (month: number) => {
+    // чаще всего плёнка снята за один месяц: первое нажатие — уже готовый выбор, окно остаётся открытым для периода
     if (!start) {
+      onChange({ year, month, endYear: null, endMonth: null });
       setStart({ year, month });
       return;
     }
@@ -306,7 +308,7 @@ export function PeriodPicker({ value, onChange }: { value: PeriodValue; onChange
         <CalendarIcon width={16} height={16} className="text-ink-faint" />
       </button>
       {open && (
-        <div className="absolute inset-x-0 top-full z-30 mt-1 rounded-[14px] bg-paper-light p-3 shadow-[0_8px_24px_rgba(0,0,0,0.5)] ring-1 ring-line">
+        <div className="absolute inset-x-0 top-full z-50 mt-2 rounded-[14px] bg-paper-light p-3 shadow-[0_8px_24px_rgba(0,0,0,0.5)] ring-1 ring-line">
           <div className="flex items-center justify-between">
             <button
               type="button"
@@ -377,7 +379,7 @@ export function PeriodPicker({ value, onChange }: { value: PeriodValue; onChange
             })}
           </div>
           <p className="mt-2 text-center text-xs text-ink-faint">
-            {years ? "Выберите год" : start ? "Теперь последний месяц (или тот же ещё раз)" : "Выберите первый месяц съёмки"}
+            {years ? "Выберите год" : start ? "Если снимали дольше, выберите последний месяц" : "Выберите месяц съёмки"}
           </p>
         </div>
       )}

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useOptimistic, useRef, useState } from "react";
 import {
@@ -21,6 +20,7 @@ import {
 import { deleteFrameAction, deleteRollAction, rotateFrameAction, saveRollAction, setRollVisibilityAction } from "../rolls/[id]/actions";
 import { control, Field, type PeriodValue } from "./fields";
 import { CameraField, FilmField, PeriodPicker, filmValue, resolveFilmAndCamera, type FilmValue } from "./RollFields";
+import BackButton from "./BackButton";
 import { LinkIcon } from "./icons";
 import Masonry from "./Masonry";
 import RollDescription from "./RollDescription";
@@ -111,11 +111,7 @@ export default function RollDetail({
     <>
       <header className="pb-6 pt-6 md:pt-8">
         <div className="relative flex items-center justify-between gap-4">
-          {backHref && (
-            <Link href={backHref} className="text-sm text-ink-faint transition-colors hover:text-ink">
-              ← Все папки
-            </Link>
-          )}
+          {backHref && <BackButton href={backHref} label="Все папки" />}
           {canEdit && (
             <div className="ml-auto flex items-center gap-2">
               {/* доступ: значок ссылки и текущее значение; по нажатию выбор и ссылка */}
@@ -125,7 +121,7 @@ export default function RollDetail({
                 aria-label={`Поделиться. Сейчас: ${VISIBILITIES.find((v) => v.id === visibility)?.short}`}
                 title="Поделиться"
                 onClick={() => setPanel(panel === "access" ? null : "access")}
-                className={`${button} flex items-center gap-1.5 ${panel === "access" ? "bg-paper-edge text-ink" : "bg-paper-deep text-ink-faint hover:text-ink-soft"}`}
+                className={`${button} flex h-8 items-center gap-1.5 ${panel === "access" ? "bg-paper-edge text-ink" : "bg-paper-deep text-ink-faint hover:text-ink-soft"}`}
               >
                 <LinkIcon width={13} height={13} />
                 {VISIBILITIES.find((v) => v.id === visibility)?.short}
@@ -134,7 +130,7 @@ export default function RollDetail({
                 type="button"
                 aria-expanded={editing}
                 onClick={() => setPanel(editing ? null : "edit")}
-                className={`${button} ${editing ? "bg-paper-edge text-ink" : "bg-paper-deep text-ink-faint hover:text-ink-soft"}`}
+                className={`${button} h-8 ${editing ? "bg-paper-edge text-ink" : "bg-paper-deep text-ink-faint hover:text-ink-soft"}`}
               >
                 Изменить
               </button>

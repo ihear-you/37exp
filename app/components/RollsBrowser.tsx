@@ -112,7 +112,7 @@ function RollCardView({ roll }: { roll: RollCard }) {
   return (
     <Link
       href={`/rolls/${roll.id}`}
-      className="group block rounded-[20px] bg-paper-light p-5 text-center shadow-[var(--card-ring)] transition-shadow hover:shadow-[var(--card-ring-hover)]"
+      className="group block rounded-[20px] bg-paper-card p-5 text-center transition-colors hover:bg-paper-deep"
     >
       <PhotoFan pics={roll.strip.map((f) => ({ id: f.id, src: feedSrc(f.id, f.v), color: f.color }))} />
       <h2 className="mt-6 text-[15px] leading-snug group-hover:text-accent">{roll.title}</h2>
